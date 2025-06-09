@@ -11,6 +11,7 @@ if not exist vcpkg (
 
 REM Installer SFML
 vcpkg\vcpkg install sfml:x64-windows
+vcpkg\vcpkg install glm
 
 echo Dépendances installées !
 pause

@@ -24,6 +24,9 @@ find_package(SFML 3.0.0 COMPONENTS Graphics Window System REQUIRED)
 # Si SFML n'est pas trouvé automatiquement, vous pouvez spécifier le chemin
 # set(SFML_DIR "C:/SFML-2.5.1/lib/cmake/SFML")
 
+# GLM
+find_package(glm CONFIG REQUIRED)
+
 # Collecter tous les fichiers source
 file(GLOB_RECURSE SOURCES 
     "src/*.cpp"
@@ -38,6 +41,7 @@ target_link_libraries(${PROJECT_NAME}
     SFML::Graphics 
     SFML::Window 
     SFML::System
+	glm::glm
 )
 
 # Inclure les répertoires

@@ -31,6 +31,7 @@ find_package(glm CONFIG REQUIRED)
 file(GLOB_RECURSE SOURCES 
     "src/*.cpp"
     "src/*.h"
+    "include/*.h"
 )
 
 # Créer l'exécutable

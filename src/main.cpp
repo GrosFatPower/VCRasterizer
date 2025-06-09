@@ -3,6 +3,8 @@
 #include <iostream>
 #include <optional>
 
+#include "SoftwareRasterizer.h"
+
 int main() {
     const int WIDTH = 800;
     const int HEIGHT = 600;
@@ -19,6 +21,11 @@ int main() {
         return -1;
     }
 
+    SoftwareRasterizer rasterizer(800, 600);
+
+    float time = 0.0f;
+    const float deltaTime = 0.016f; // ~60 FPS
+
     sf::Sprite sprite(texture);
 
     while (window.isOpen()) {
@@ -29,9 +36,16 @@ int main() {
             }
         }
 
+        rasterizer.renderRotatingTriangle(time);
+
+        const uint32_t* pixels = rasterizer.getColorBuffer();
+        texture.update(reinterpret_cast<const std::uint8_t*>(pixels));
+
         window.clear();
         window.draw(sprite);
         window.display();
+
+        time += deltaTime;
     }
 
     return 0;

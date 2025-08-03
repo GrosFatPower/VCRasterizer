@@ -40,7 +40,7 @@ struct TransformedTriangle {
   SIMD_ALIGN float edgeC[3];
 };
 
-struct RenderTile {
+struct Tile {
   int x, y;
   int width, height;
   std::vector<const TransformedTriangle*> triangles;
@@ -48,97 +48,92 @@ struct RenderTile {
 
 class MultiThreadedSIMDRasterizer
 {
-private:
-  int screenWidth, screenHeight;
-  int tileCountX, tileCountY;
-
-  std::vector<uint32_t> colorBuffer;
-  std::vector<float> depthBuffer;
-  std::vector<RenderTile> tiles;
-
-  // Thread pool
-  std::vector<std::thread> workerThreads;
-  std::atomic<int> nextTileIndex{ 0 };
-  std::atomic<bool> renderingActive{ false };
-
-  // Stats de performance
-  //std::atomic<int> trianglesProcessed{ 0 };
-  //std::atomic<int> pixelsRendered{ 0 };
-
-  // Compteurs FPS et timing
-  mutable std::mutex statsMutex;
-  std::chrono::high_resolution_clock::time_point lastFrameTime;
-  std::chrono::high_resolution_clock::time_point startTime;
-  std::vector<double> frameTimes;
-  double currentFPS = 0.0;
-  double avgFrameTime = 0.0;
-  int frameCount = 0;
-
-  static constexpr int FPS_HISTORY_SIZE = 60; // Moyenner sur 60 frames
-
 public:
   MultiThreadedSIMDRasterizer(int w, int h, int numThreads = 0);
 
   ~MultiThreadedSIMDRasterizer();
 
-  void clear(uint32_t color = 0x000000FF);
+  void Clear(uint32_t color = 0x000000FF);
+
+  int InitSingleTriangleScene();
+  int InitMultipleTrianglesScene();
 
   // Transformation et culling des triangles en batch
-  std::vector<TransformedTriangle> transformTriangles(const std::vector<Triangle>& triangles, const glm::mat4& mvp);
+  std::vector<TransformedTriangle> TransformTriangles(const std::vector<Triangle>& triangles, const glm::mat4& mvp);
 
   // Binning des triangles par tuile (avec overlap detection)
-  void binTrianglesToTiles(const std::vector<TransformedTriangle>& triangles);
+  void BinTrianglesToTiles(const std::vector<TransformedTriangle>& triangles);
 
   // Worker thread function
-  void workerThreadFunction();
+  void WorkerThreadFunction();
 
   // Rendu d'une tuile avec SIMD
-  void renderTile(const RenderTile& tile);
+  void RenderTile(const Tile & tile);
 
-  void renderTriangleInTile(const TransformedTriangle& tri, const RenderTile& tile);
+  void RenderTriangleInTile(const TransformedTriangle& tri, const Tile & tile);
 
   // Test SIMD de 8 pixels
-  __m256i testPixels8x(float startX, float y, const TransformedTriangle& tri);
+  __m256i TestPixels8x(float startX, float y, const TransformedTriangle& tri);
 
-  void interpolateDepth8x(float startX, float y, const TransformedTriangle& tri,
+  void InterpolateDepth8x(float startX, float y, const TransformedTriangle& tri,
     const glm::vec3& depths, const glm::vec3& wValues, float* output);
 
-  void setupEdgeFunctions(TransformedTriangle& tri);
+  void SetupEdgeFunctions(TransformedTriangle& tri);
 
-  glm::vec4 transformVertex(const glm::vec3& vertex, const glm::mat4& mvp);
+  glm::vec4 TransformVertex(const glm::vec3& vertex, const glm::mat4& mvp);
 
   // Fonction principale de rendu
-  void renderTriangles(const std::vector<Triangle>& triangles, const glm::mat4& mvp);
+  void RenderTriangles(const std::vector<Triangle>& triangles, const glm::mat4& mvp);
 
-  void renderRotatingTriangle(float time);
-
-  void renderRotatingTriangles(float time);
+  void RenderRotatingScene(float time);
 
   // Mise à jour des statistiques FPS
-  void updateFrameStats();
+  void UpdateFrameStats();
+  double GetCurrentFPS() const;
+  double GetAverageFrameTime() const;
+  double GetLastFrameTime() const;
+  int GetFrameCount() const;
+  double GetTotalRenderTime() const;
+  void PrintPerformanceStats() const;
 
-  // Getters thread-safe pour les stats
-  double getCurrentFPS() const;
+  const uint32_t* GetColorBuffer() const { return _ColorBuffer.data(); }
+  int GetWidth() const { return _ScreenWidth; }
+  int GetHeight() const { return _ScreenHeight; }
 
-  double getAverageFrameTime() const;
+private:
+  int _ScreenWidth, _ScreenHeight;
+  int _TileCountX, _TileCountY;
 
-  double getLastFrameTime() const;
+  std::vector<uint32_t> _ColorBuffer;
+  std::vector<float> _DepthBuffer;
+  std::vector<Tile> _Tiles;
 
-  int getFrameCount() const;
+  // Thread pool
+  std::vector<std::thread> _WorkerThreads;
+  std::atomic<int> A_NextTileIndex{ 0 };
+  std::atomic<bool> A_RenderingActive{ false };
 
-  double getTotalRenderTime() const;
+  // Scene
+  std::vector<Triangle> _Triangles;
 
-  // Affichage des stats de performance détaillées
-  void printPerformanceStats() const;
+  // Stats de performance
+  std::atomic<int> A_TrianglesProcessed{ 0 };
+  std::atomic<int> A_PixelsRendered{ 0 };
 
-  const uint32_t* getColorBuffer() const { return colorBuffer.data(); }
-  int getWidth() const { return screenWidth; }
-  int getHeight() const { return screenHeight; }
+  // Compteurs FPS et timing
+  mutable std::mutex _StatsMutex;
+  std::chrono::high_resolution_clock::time_point _LastFrameTime;
+  std::chrono::high_resolution_clock::time_point _StartTime;
+  std::vector<double> _FrameTimes;
+  double _CurrentFPS = 0.0;
+  double _AvgFrameTime = 0.0;
+  int _FrameCount = 0;
+  static constexpr int FPS_HISTORY_SIZE = 60; // Moyenner sur 60 frames
 };
 
 // Classe de benchmark pour comparer single-thread vs multi-thread
 class MTRasterizerBenchmark
 {
 public:
-  static void comparePerformance(int triangleCount = 1000);
+  static void ComparePerformance(int triangleCount = 1000);
 };

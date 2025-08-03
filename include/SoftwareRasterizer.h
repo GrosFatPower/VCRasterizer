@@ -7,10 +7,27 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 class SoftwareRasterizer {
+
+  struct Triangle {
+    glm::vec3 vertices[3];
+    uint32_t color;
+    uint32_t materialId;
+
+    Triangle(const glm::vec3& v0, const glm::vec3& v1, const glm::vec3& v2, uint32_t col = 0xFF0000FF)
+      : color(col), materialId(0) {
+      vertices[0] = v0;
+      vertices[1] = v1;
+      vertices[2] = v2;
+    }
+  };
+
 private:
   int width, height;
   std::vector<uint32_t> colorBuffer;  // RGBA format
   std::vector<float> depthBuffer;     // Z-buffer
+
+  // Scene
+  std::vector<Triangle> tris;
 
 public:
   SoftwareRasterizer(int w, int h) : width(w), height(h) {
@@ -125,15 +142,9 @@ public:
   }
 
   // Rendu d'un triangle en rotation
-  void renderRotatingTriangle(float time) {
+  void renderRotatingScene(float time)
+  {
     clear();
-
-    // Définir un triangle simple
-    glm::vec3 vertices[3] = {
-        glm::vec3(0.0f, 1.0f, 0.0f),   // Sommet
-        glm::vec3(-1.0f, -1.0f, 0.0f), // Base gauche
-        glm::vec3(1.0f, -1.0f, 0.0f)   // Base droite
-    };
 
     // Matrices de transformation
     glm::mat4 model = glm::rotate(glm::mat4(1.0f), time, glm::vec3(0, 1, 0)); // Rotation Y
@@ -151,7 +162,49 @@ public:
     glm::mat4 mvp = projection * view * model;
 
     // Rendu du triangle
-    drawTriangle(vertices[0], vertices[1], vertices[2], mvp, 0xFF0000FF); // Rouge
+    for ( const auto & tri : tris ) 
+      drawTriangle(tri.vertices[0], tri.vertices[1], tri.vertices[2], mvp, tri.color);
+  }
+
+  int InitSingleTriangleScene()
+  {
+    tris.clear();
+
+    glm::vec3 vertices[3] = {
+        glm::vec3(0.0f, 1.0f, 0.0f),   // Sommet
+        glm::vec3(-1.0f, -1.0f, 0.0f), // Base gauche
+        glm::vec3(1.0f, -1.0f, 0.0f)   // Base droite
+    };
+
+    tris.emplace_back(vertices[0], vertices[1], vertices[2], 0xFF0000FF);
+
+    return 0;
+  }
+
+  int InitMultipleTrianglesScene()
+  {
+    tris.clear();
+
+    // Créer plusieurs triangles pour tester le multi-threading
+    for (int i = 0; i < 10000; ++i) 
+    {
+      float offset = i * 0.1f;
+      glm::vec3 vertices[3] = {
+          glm::vec3(sin(offset) * 0.5f, 1.0f + cos(offset) * 0.2f, offset * 0.1f),
+          glm::vec3(-1.0f + sin(offset) * 0.3f, -1.0f, offset * 0.1f),
+          glm::vec3(1.0f + cos(offset) * 0.3f, -1.0f, offset * 0.1f)
+      };
+
+      offset = static_cast <float>(rand()) / static_cast <float>(RAND_MAX) * 2.f - 1.f;
+      vertices[0] += offset;
+      vertices[1] += offset;
+      vertices[2] += offset;
+
+      uint32_t color = 0xFF000000 | ((i * 25) % 255) << 16 | ((i * 50) % 255) << 8 | ((i * 75) % 255);
+      tris.emplace_back(vertices[0], vertices[1], vertices[2], color);
+    }
+
+    return 0;
   }
 
   // Accès au buffer pour affichage

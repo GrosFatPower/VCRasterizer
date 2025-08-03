@@ -6,6 +6,9 @@
 #include "SoftwareRasterizer.h"
 #include "MultiThreadedSIMDRasterizer.h"
 
+const int WIDTH = 1920;
+const int HEIGHT = 1080;
+
 // Version avec gestion d'événements plus réaliste
 class FPSCounter {
 private:
@@ -48,9 +51,6 @@ public:
 
 int TestSoftwareRasterizer()
 {
-  const int WIDTH = 800;
-  const int HEIGHT = 600;
-
   // SFML 3.0: VideoMode prend maintenant un sf::Vector2u
   sf::RenderWindow window(sf::VideoMode({ WIDTH, HEIGHT }), "Vibe Coded Rasterizer");
   window.setVerticalSyncEnabled(false);
@@ -64,9 +64,12 @@ int TestSoftwareRasterizer()
     return -1;
   }
 
-  SoftwareRasterizer rasterizer(800, 600);
-  FPSCounter fpsCounter;
+  SoftwareRasterizer rasterizer(WIDTH, HEIGHT);
 
+  //rasterizer.InitSingleTriangleScene();
+  rasterizer.InitMultipleTrianglesScene();
+
+  FPSCounter fpsCounter;
   sf::Clock clock;
   float time = 0.0f;
   //const float deltaTime = 0.016f; // ~60 FPS
@@ -83,7 +86,7 @@ int TestSoftwareRasterizer()
         window.close();
     }
 
-    rasterizer.renderRotatingTriangle(time);
+    rasterizer.renderRotatingScene(time);
     fpsCounter.update();
 
     const uint32_t* pixels = rasterizer.getColorBuffer();
@@ -119,9 +122,6 @@ int TestSoftwareRasterizer()
 
 int TestMultiThreadedSIMDRasterizer()
 {
-  const int WIDTH = 800;
-  const int HEIGHT = 600;
-
   // SFML 3.0: VideoMode prend maintenant un sf::Vector2u
   sf::RenderWindow window(sf::VideoMode({ WIDTH, HEIGHT }), "Vibe Coded Multi-Threaded Rasterizer");
 
@@ -134,9 +134,12 @@ int TestMultiThreadedSIMDRasterizer()
     return -1;
   }
 
-  MultiThreadedSIMDRasterizer rasterizer(800, 600, 8); // 8 threads
-  FPSCounter fpsCounter;
+  MultiThreadedSIMDRasterizer rasterizer(WIDTH, HEIGHT, 8); // 8 threads
 
+  //rasterizer.InitSingleTriangleScene();
+  rasterizer.InitMultipleTrianglesScene();
+
+  FPSCounter fpsCounter;
   sf::Clock clock;
   float time = 0.0f;
   //const float deltaTime = 0.016f; // ~60 FPS
@@ -151,10 +154,10 @@ int TestMultiThreadedSIMDRasterizer()
       if (event->is<sf::Event::Closed>())
         window.close();
     }
-    rasterizer.renderRotatingTriangle(time);
+    rasterizer.RenderRotatingScene(time);
     fpsCounter.update();
 
-    const uint32_t* pixels = rasterizer.getColorBuffer();
+    const uint32_t* pixels = rasterizer.GetColorBuffer();
     texture.update(reinterpret_cast<const std::uint8_t*>(pixels));
 
     window.clear();

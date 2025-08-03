@@ -394,12 +394,12 @@ int MultiThreadedSIMDRasterizer::InitSingleTriangleScene()
   return 0;
 }
 
-int MultiThreadedSIMDRasterizer::InitMultipleTrianglesScene()
+int MultiThreadedSIMDRasterizer::InitMultipleTrianglesScene( const int nbTris )
 {
   _Triangles.clear();
 
   // Créer plusieurs triangles pour tester le multi-threading
-  for (int i = 0; i < 10000; ++i) 
+  for (int i = 0; i < nbTris; ++i)
   {
     float offset = i * 0.1f;
     glm::vec3 vertices[3] = {
@@ -408,10 +408,9 @@ int MultiThreadedSIMDRasterizer::InitMultipleTrianglesScene()
         glm::vec3(1.0f + cos(offset) * 0.3f, -1.0f, offset * 0.1f)
     };
 
-    offset = static_cast <float>(rand()) / static_cast <float>(RAND_MAX) * 2.f - 1.f;
-    vertices[0] += offset;
-    vertices[1] += offset;
-    vertices[2] += offset;
+    vertices[0] += (static_cast <float>(rand()) / static_cast <float>(RAND_MAX)) * 2.f - 1.f;
+    vertices[1] += (static_cast <float>(rand()) / static_cast <float>(RAND_MAX)) * 2.f - 1.f;
+    vertices[2] += (static_cast <float>(rand()) / static_cast <float>(RAND_MAX)) * 2.f - 1.f;
 
     uint32_t color = 0xFF000000 | ((i * 25) % 255) << 16 | ((i * 50) % 255) << 8 | ((i * 75) % 255);
     _Triangles.emplace_back(vertices[0], vertices[1], vertices[2], color);
@@ -427,15 +426,15 @@ void MultiThreadedSIMDRasterizer::RenderRotatingScene(float time)
   // Matrices de transformation
   glm::mat4 model = glm::rotate(glm::mat4(1.0f), time, glm::vec3(0, 1, 0)); // Rotation Y
   glm::mat4 view = glm::lookAt(
-    glm::vec3(0, 0, 5),  // Position caméra
+    glm::vec3(0, 0, 7),  // Position caméra
     glm::vec3(0, 0, 0),  // Point regardé
     glm::vec3(0, 1, 0)   // Up vector
   );
 
   glm::mat4 projection = glm::perspective(
-    glm::radians(45.0f),                       // FOV
+    glm::radians(45.0f),                         // FOV
     (float)_ScreenWidth / (float)_ScreenHeight,  // Aspect ratio
-    0.1f, 100.0f                               // Near/Far planes
+    0.1f, 100.0f                                 // Near/Far planes
   );
 
   glm::mat4 mvp = projection * view * model;

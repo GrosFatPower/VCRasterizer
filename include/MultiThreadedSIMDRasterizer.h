@@ -56,7 +56,7 @@ public:
   void Clear(uint32_t color = 0x000000FF);
 
   int InitSingleTriangleScene();
-  int InitMultipleTrianglesScene();
+  int InitMultipleTrianglesScene(const int nbTris = 100);
 
   // Transformation et culling des triangles en batch
   std::vector<TransformedTriangle> TransformTriangles(const std::vector<Triangle>& triangles, const glm::mat4& mvp);

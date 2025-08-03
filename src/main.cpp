@@ -134,10 +134,12 @@ int TestMultiThreadedSIMDRasterizer()
     return -1;
   }
 
-  MultiThreadedSIMDRasterizer rasterizer(WIDTH, HEIGHT, 8); // 8 threads
+  int threadCount = std::thread::hardware_concurrency();
+  MultiThreadedSIMDRasterizer rasterizer(WIDTH, HEIGHT, threadCount);
 
   //rasterizer.InitSingleTriangleScene();
-  rasterizer.InitMultipleTrianglesScene();
+  const int nbTris = 100;
+  rasterizer.InitMultipleTrianglesScene(nbTris);
 
   FPSCounter fpsCounter;
   sf::Clock clock;

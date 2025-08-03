@@ -4,49 +4,202 @@
 #include <optional>
 
 #include "SoftwareRasterizer.h"
+#include "MultiThreadedSIMDRasterizer.h"
 
-int main() {
-    const int WIDTH = 800;
-    const int HEIGHT = 600;
+// Version avec gestion d'événements plus réaliste
+class FPSCounter {
+private:
+  std::chrono::high_resolution_clock::time_point lastUpdate;
+  std::vector<double> frameTimes;
+  double currentFPS = 0.0;
+  static constexpr int HISTORY_SIZE = 30;
 
-    // SFML 3.0: VideoMode prend maintenant un sf::Vector2u
-    sf::RenderWindow window(sf::VideoMode({ WIDTH, HEIGHT }), "Vibe Coded Rasterizer");
+public:
+  FPSCounter() : lastUpdate(std::chrono::high_resolution_clock::now()) {
+    frameTimes.reserve(HISTORY_SIZE);
+  }
 
-    // SFML 3.0: Utiliser le constructeur d'Image au lieu de create()
-    sf::Image image({ WIDTH, HEIGHT }, sf::Color::Red);
+  void update() {
+    auto now = std::chrono::high_resolution_clock::now();
+    auto deltaTime = std::chrono::duration<double, std::milli>(now - lastUpdate);
+    lastUpdate = now;
 
-    sf::Texture texture;
-    if (!texture.loadFromImage(image)) {
-        std::cerr << "Erreur lors du chargement de la texture" << std::endl;
-        return -1;
+    if (frameTimes.size() >= HISTORY_SIZE) {
+      frameTimes.erase(frameTimes.begin());
+    }
+    frameTimes.push_back(deltaTime.count());
+
+    if (!frameTimes.empty()) {
+      double avgTime = 0.0;
+      for (double time : frameTimes) {
+        avgTime += time;
+      }
+      avgTime /= frameTimes.size();
+      currentFPS = 1000.0 / avgTime;
+    }
+  }
+
+  double getFPS() const { return currentFPS; }
+  double getLastFrameTime() const {
+    return frameTimes.empty() ? 0.0 : frameTimes.back();
+  }
+};
+
+
+int TestSoftwareRasterizer()
+{
+  const int WIDTH = 800;
+  const int HEIGHT = 600;
+
+  // SFML 3.0: VideoMode prend maintenant un sf::Vector2u
+  sf::RenderWindow window(sf::VideoMode({ WIDTH, HEIGHT }), "Vibe Coded Rasterizer");
+  window.setVerticalSyncEnabled(false);
+
+  // SFML 3.0: Utiliser le constructeur d'Image au lieu de create()
+  sf::Image image({ WIDTH, HEIGHT }, sf::Color::Red);
+
+  sf::Texture texture;
+  if (!texture.loadFromImage(image)) {
+    std::cerr << "Erreur lors du chargement de la texture" << std::endl;
+    return -1;
+  }
+
+  SoftwareRasterizer rasterizer(800, 600);
+  FPSCounter fpsCounter;
+
+  sf::Clock clock;
+  float time = 0.0f;
+  //const float deltaTime = 0.016f; // ~60 FPS
+  //bool showDetailedStats = false;
+
+  sf::Sprite sprite(texture);
+
+  while ( window.isOpen() )
+  {
+    // SFML 3.0: pollEvent() retourne maintenant un std::optional<sf::Event>
+    while (std::optional<sf::Event> event = window.pollEvent())
+    {
+      if (event->is<sf::Event::Closed>())
+        window.close();
     }
 
-    SoftwareRasterizer rasterizer(800, 600);
+    rasterizer.renderRotatingTriangle(time);
+    fpsCounter.update();
 
-    float time = 0.0f;
-    const float deltaTime = 0.016f; // ~60 FPS
+    const uint32_t* pixels = rasterizer.getColorBuffer();
+    texture.update(reinterpret_cast<const std::uint8_t*>(pixels));
 
-    sf::Sprite sprite(texture);
+    window.clear();
+    window.draw(sprite);
+    window.display();
 
-    while (window.isOpen()) {
-        // SFML 3.0: pollEvent() retourne maintenant un std::optional<sf::Event>
-        while (std::optional<sf::Event> event = window.pollEvent()) {
-            if (event->is<sf::Event::Closed>()) {
-                window.close();
-            }
-        }
+    // Affichage FPS compact en continu
+    //std::cout << "FPS: " << std::setw(6) << std::fixed << std::setprecision(1)
+    //  << fpsCounter.getFPS()
+    //  << " | " << std::setw(6) << std::fixed << std::setprecision(2)
+    //  << fpsCounter.getLastFrameTime() << "ms | "
+    //  //<< "Triangles: " << rasterizer.trianglesProcessed.load()
+    //  << "     \r" << std::flush;
 
-        rasterizer.renderRotatingTriangle(time);
+    window.setTitle("Vibe Coded Rasterizer - FPS: " + std::to_string(static_cast<int>(fpsCounter.getFPS())));
 
-        const uint32_t* pixels = rasterizer.getColorBuffer();
-        texture.update(reinterpret_cast<const std::uint8_t*>(pixels));
+    // Stats détaillées si activées
+    //if (showDetailedStats && rasterizer.getFrameCount() % 60 == 0) {
+    //  std::cout << std::endl;
+    //  rasterizer.printPerformanceStats();
+    //}
 
-        window.clear();
-        window.draw(sprite);
-        window.display();
+    sf::Time elapsed = clock.restart();
+    float deltaTime = elapsed.asSeconds();
+    time += deltaTime;
+  }
 
-        time += deltaTime;
+  return 0;
+}
+
+int TestMultiThreadedSIMDRasterizer()
+{
+  const int WIDTH = 800;
+  const int HEIGHT = 600;
+
+  // SFML 3.0: VideoMode prend maintenant un sf::Vector2u
+  sf::RenderWindow window(sf::VideoMode({ WIDTH, HEIGHT }), "Vibe Coded Multi-Threaded Rasterizer");
+
+  // SFML 3.0: Utiliser le constructeur d'Image au lieu de create()
+  sf::Image image({ WIDTH, HEIGHT }, sf::Color::Red);
+  sf::Texture texture;
+  if (!texture.loadFromImage(image))
+  {
+    std::cerr << "Erreur lors du chargement de la texture" << std::endl;
+    return -1;
+  }
+
+  MultiThreadedSIMDRasterizer rasterizer(800, 600, 8); // 8 threads
+  FPSCounter fpsCounter;
+
+  sf::Clock clock;
+  float time = 0.0f;
+  //const float deltaTime = 0.016f; // ~60 FPS
+  //bool showDetailedStats = false;
+
+  sf::Sprite sprite(texture);
+  while ( window.isOpen() )
+  {
+    // SFML 3.0: pollEvent() retourne maintenant un std::optional<sf::Event>
+    while (std::optional<sf::Event> event = window.pollEvent())
+    {
+      if (event->is<sf::Event::Closed>())
+        window.close();
     }
+    rasterizer.renderRotatingTriangle(time);
+    fpsCounter.update();
 
-    return 0;
+    const uint32_t* pixels = rasterizer.getColorBuffer();
+    texture.update(reinterpret_cast<const std::uint8_t*>(pixels));
+
+    window.clear();
+    window.draw(sprite);
+    window.display();
+
+    // Affichage FPS compact en continu
+    //std::cout << "FPS: " << std::setw(6) << std::fixed << std::setprecision(1)
+    //  << fpsCounter.getFPS()
+    //  << " | " << std::setw(6) << std::fixed << std::setprecision(2)
+    //  << fpsCounter.getLastFrameTime() << "ms | "
+    //  //<< "Triangles: " << rasterizer.trianglesProcessed.load()
+    //  << "     \r" << std::flush;
+
+    window.setTitle("Vibe Coded Rasterizer - FPS: " + std::to_string(static_cast<int>(fpsCounter.getFPS())));
+
+    // Stats détaillées si activées
+    //if (showDetailedStats && rasterizer.getFrameCount() % 60 == 0) {
+    //  std::cout << std::endl;
+    //  rasterizer.printPerformanceStats();
+    //}
+
+    sf::Time elapsed = clock.restart();
+    float deltaTime = elapsed.asSeconds();
+    time += deltaTime;
+  }
+  return 0;
+}
+
+int main()
+{
+  static short testNum = 1;
+
+  if ( testNum == 0 )
+  {
+    std::cout << "Test Software Rasterizer" << std::endl;
+    testNum++;
+    return TestSoftwareRasterizer();
+  }
+  else if ( testNum == 1 )
+  {
+    std::cout << "Test Multi-Threaded SIMD Rasterizer" << std::endl;
+    testNum++;
+    return TestMultiThreadedSIMDRasterizer();
+  }
+
+  return 1;
 }

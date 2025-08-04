@@ -126,7 +126,7 @@ int TestMultiThreadedSIMDRasterizer()
   sf::RenderWindow window(sf::VideoMode({ WIDTH, HEIGHT }), "Vibe Coded Multi-Threaded Rasterizer");
 
   // SFML 3.0: Utiliser le constructeur d'Image au lieu de create()
-  sf::Image image({ WIDTH, HEIGHT }, sf::Color::Red);
+  sf::Image image({ WIDTH, HEIGHT }, sf::Color::White);
   sf::Texture texture;
   if (!texture.loadFromImage(image))
   {
@@ -138,7 +138,7 @@ int TestMultiThreadedSIMDRasterizer()
   MultiThreadedSIMDRasterizer rasterizer(WIDTH, HEIGHT, threadCount);
 
   //rasterizer.InitSingleTriangleScene();
-  const int nbTris = 100;
+  const int nbTris = 1000;
   rasterizer.InitMultipleTrianglesScene(nbTris);
 
   FPSCounter fpsCounter;

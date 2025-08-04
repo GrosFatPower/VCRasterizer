@@ -4,6 +4,7 @@
 #include <iomanip>
 #include <chrono>
 #include <string>
+#include <random>
 
 MultiThreadedSIMDRasterizer::MultiThreadedSIMDRasterizer(int w, int h, int numThreads)
 : _ScreenWidth(w)
@@ -83,10 +84,10 @@ void MultiThreadedSIMDRasterizer::Clear(uint32_t color)
 }
 
 // Transformation et culling des triangles en batch
-std::vector<TransformedTriangle> MultiThreadedSIMDRasterizer::TransformTriangles(const std::vector<Triangle>& triangles, const glm::mat4& mvp)
+void MultiThreadedSIMDRasterizer::TransformTriangles(const std::vector<Triangle>& triangles, const glm::mat4& mvp, std::vector<TransformedTriangle> & oTransformed)
 {
-  std::vector<TransformedTriangle> transformed;
-  transformed.reserve(triangles.size());
+  oTransformed.clear();
+  oTransformed.reserve(triangles.size());
 
   // Traitement par batch pour optimiser le cache
   const int batchSize = 64;
@@ -112,7 +113,7 @@ std::vector<TransformedTriangle> MultiThreadedSIMDRasterizer::TransformTriangles
 
       float crossProduct = edge1.x * edge2.y - edge1.y * edge2.x;
 
-      if (crossProduct <= 0)
+      if (_BackfaceCullingEnabled && crossProduct <= 0)
         continue;
 
       tri.area = crossProduct * 0.5f;
@@ -135,12 +136,10 @@ std::vector<TransformedTriangle> MultiThreadedSIMDRasterizer::TransformTriangles
       if (inScreen)
       {
         tri.valid = true;
-        transformed.push_back(tri);
+        oTransformed.push_back(tri);
       }
     }
   }
-
-  return transformed;
 }
 
 // Binning des triangles par tuile (avec overlap detection)
@@ -194,19 +193,18 @@ void MultiThreadedSIMDRasterizer::WorkerThreadFunction()
 {
   while (true)
   {
-    // Attendre qu'une tâche de rendu soit disponible
-    if (!A_RenderingActive.load())
+    std::unique_lock<std::mutex> lock(_RenderMutex);
+    _RenderCV.wait(lock, [this] { return A_RenderingActive.load(); });
+
+    while (A_RenderingActive.load())
     {
-      std::this_thread::sleep_for(std::chrono::microseconds(10));
-      continue;
+      int tileIndex = A_NextTileIndex.fetch_add(1);
+      if (tileIndex >= _Tiles.size())
+        break;
+      lock.unlock();
+      RenderTile(_Tiles[tileIndex]);
+      lock.lock();
     }
-
-    // Récupérer la prochaine tuile à traiter
-    int tileIndex = A_NextTileIndex.fetch_add(1);
-    if (tileIndex >= _Tiles.size())
-      continue; // Plus de tuiles à traiter
-
-    RenderTile(_Tiles[tileIndex]);
   }
 }
 
@@ -214,7 +212,13 @@ void MultiThreadedSIMDRasterizer::WorkerThreadFunction()
 void MultiThreadedSIMDRasterizer::RenderTile(const Tile & tile)
 {
   for (const auto* tri : tile.triangles)
-    RenderTriangleInTile(*tri, tile);
+      RenderTriangleInTile(*tri, tile);
+
+  // Notify main thread if all tiles are done
+  if (A_NextTileIndex.load() >= _Tiles.size()) {
+      std::lock_guard<std::mutex> lock(_TilesDoneMutex);
+      _TilesDoneCV.notify_one();
+  }
 }
 
 void MultiThreadedSIMDRasterizer::RenderTriangleInTile(const TransformedTriangle& tri, const Tile & tile)
@@ -374,7 +378,8 @@ glm::vec4 MultiThreadedSIMDRasterizer::TransformVertex(const glm::vec3& vertex, 
 
   float x = (clipSpace.x + 1.0f) * 0.5f * _ScreenWidth;
   float y = (1.0f - clipSpace.y) * 0.5f * _ScreenHeight;
-  float z = clipSpace.z;
+  //float z = clipSpace.z;
+  float z = (clipSpace.z + 1.0f) * 0.5f; // Map z to [0,1]
 
   return glm::vec4(x, y, z, clipSpace.w);
 }
@@ -382,6 +387,7 @@ glm::vec4 MultiThreadedSIMDRasterizer::TransformVertex(const glm::vec3& vertex, 
 int MultiThreadedSIMDRasterizer::InitSingleTriangleScene()
 {
   _Triangles.clear();
+  _Transformed.clear();
 
   glm::vec3 vertices[3] = {
       glm::vec3(0.0f, 1.0f, 0.0f),   // Sommet
@@ -394,39 +400,55 @@ int MultiThreadedSIMDRasterizer::InitSingleTriangleScene()
   return 0;
 }
 
-int MultiThreadedSIMDRasterizer::InitMultipleTrianglesScene( const int nbTris )
+int MultiThreadedSIMDRasterizer::InitMultipleTrianglesScene(const int nbTris)
 {
-  _Triangles.clear();
+    _Triangles.clear();
+    _Transformed.clear();
 
-  // Créer plusieurs triangles pour tester le multi-threading
-  for (int i = 0; i < nbTris; ++i)
-  {
-    float offset = i * 0.1f;
-    glm::vec3 vertices[3] = {
-        glm::vec3(sin(offset) * 0.5f, 1.0f + cos(offset) * 0.2f, offset * 0.1f),
-        glm::vec3(-1.0f + sin(offset) * 0.3f, -1.0f, offset * 0.1f),
-        glm::vec3(1.0f + cos(offset) * 0.3f, -1.0f, offset * 0.1f)
-    };
+    static thread_local std::mt19937 gen(std::random_device{}());
+    std::uniform_real_distribution<float> posDist(-1.0f, 1.0f);      // For centroid x/y
+    std::uniform_real_distribution<float> zDist(0.0f, 1.0f);         // For centroid z (depth)
+    std::uniform_real_distribution<float> sizeDist(0.05f, 0.25f);    // Triangle size
+    std::uniform_real_distribution<float> angleDist(0.0f, 2.0f * 3.14159265f); // Orientation
 
-    vertices[0] += (static_cast <float>(rand()) / static_cast <float>(RAND_MAX)) * 2.f - 1.f;
-    vertices[1] += (static_cast <float>(rand()) / static_cast <float>(RAND_MAX)) * 2.f - 1.f;
-    vertices[2] += (static_cast <float>(rand()) / static_cast <float>(RAND_MAX)) * 2.f - 1.f;
+    for (int i = 0; i < nbTris; ++i)
+    {
+        // Random centroid in NDC
+        float cx = posDist(gen);
+        float cy = posDist(gen);
+        float cz = zDist(gen);
 
-    uint32_t color = 0xFF000000 | ((i * 25) % 255) << 16 | ((i * 50) % 255) << 8 | ((i * 75) % 255);
-    _Triangles.emplace_back(vertices[0], vertices[1], vertices[2], color);
-  }
+        // Random size and orientation
+        float size = sizeDist(gen);
+        float baseAngle = angleDist(gen);
 
-  return 0;
+        glm::vec3 vertices[3];
+        for (int v = 0; v < 3; ++v)
+        {
+            float angle = baseAngle + v * (2.0f * 3.14159265f / 3.0f);
+            float r = size * (0.8f + 0.4f * posDist(gen)); // Slightly irregular triangle
+            vertices[v] = glm::vec3(
+                cx + r * std::cos(angle),
+                cy + r * std::sin(angle),
+                cz
+            );
+        }
+
+        uint32_t color = 0xFF000000 | ((i * 25) % 255) << 16 | ((i * 50) % 255) << 8 | ((i * 75) % 255);
+        _Triangles.emplace_back(vertices[0], vertices[1], vertices[2], color);
+    }
+
+    return 0;
 }
 
 void MultiThreadedSIMDRasterizer::RenderRotatingScene(float time)
 {
-  Clear();
+  Clear(0xADD8E6FF); // Light blue in RGBA
 
   // Matrices de transformation
   glm::mat4 model = glm::rotate(glm::mat4(1.0f), time, glm::vec3(0, 1, 0)); // Rotation Y
   glm::mat4 view = glm::lookAt(
-    glm::vec3(0, 0, 7),  // Position caméra
+    glm::vec3(0, 0, 3),  // Position caméra
     glm::vec3(0, 0, 0),  // Point regardé
     glm::vec3(0, 1, 0)   // Up vector
   );
@@ -452,18 +474,21 @@ void MultiThreadedSIMDRasterizer::RenderTriangles(const std::vector<Triangle>& t
   auto startT = std::chrono::high_resolution_clock::now();
 
   // 1. Transformation des triangles
-  auto transformed = TransformTriangles(triangles, mvp);
+  TransformTriangles(triangles, mvp, _Transformed);
 
   // 2. Binning des triangles aux tuiles
-  BinTrianglesToTiles(transformed);
+  BinTrianglesToTiles(_Transformed);
 
   // 3. Rendu multi-threadé
   A_NextTileIndex = 0;
   A_RenderingActive = true;
+  _RenderCV.notify_all();
 
   // Attendre que tous les threads finissent
-  while (A_NextTileIndex.load() < _Tiles.size())
-    std::this_thread::sleep_for(std::chrono::microseconds(10));
+  {
+    std::unique_lock<std::mutex> lock(_TilesDoneMutex);
+    _TilesDoneCV.wait(lock, [this] { return A_NextTileIndex.load() >= _Tiles.size(); });
+  }
 
   A_RenderingActive = false;
 

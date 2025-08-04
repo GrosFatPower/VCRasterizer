@@ -13,7 +13,6 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #define SIMD_ALIGN alignas(32)
-#define TILE_SIZE 32
 
 struct Triangle {
   glm::vec3 vertices[3];
@@ -59,7 +58,7 @@ public:
   int InitMultipleTrianglesScene(const int nbTris = 100);
 
   // Transformation et culling des triangles en batch
-  std::vector<TransformedTriangle> TransformTriangles(const std::vector<Triangle>& triangles, const glm::mat4& mvp);
+  void TransformTriangles(const std::vector<Triangle>& triangles, const glm::mat4& mvp, std::vector<TransformedTriangle>& oTransformed);
 
   // Binning des triangles par tuile (avec overlap detection)
   void BinTrianglesToTiles(const std::vector<TransformedTriangle>& triangles);
@@ -100,6 +99,8 @@ public:
   int GetWidth() const { return _ScreenWidth; }
   int GetHeight() const { return _ScreenHeight; }
 
+  void SetBackfaceCullingEnabled(bool enabled) { _BackfaceCullingEnabled = enabled; }
+
 private:
   int _ScreenWidth, _ScreenHeight;
   int _TileCountX, _TileCountY;
@@ -112,9 +113,14 @@ private:
   std::vector<std::thread> _WorkerThreads;
   std::atomic<int> A_NextTileIndex{ 0 };
   std::atomic<bool> A_RenderingActive{ false };
+  std::condition_variable _RenderCV;
+  std::mutex _RenderMutex;
+  std::condition_variable _TilesDoneCV;
+  std::mutex _TilesDoneMutex;
 
   // Scene
   std::vector<Triangle> _Triangles;
+  std::vector<TransformedTriangle> _Transformed;
 
   // Stats de performance
   std::atomic<int> A_TrianglesProcessed{ 0 };
@@ -129,6 +135,10 @@ private:
   double _AvgFrameTime = 0.0;
   int _FrameCount = 0;
   static constexpr int FPS_HISTORY_SIZE = 60; // Moyenner sur 60 frames
+
+  bool _BackfaceCullingEnabled = true;
+
+  static constexpr int TILE_SIZE = 64;
 };
 
 // Classe de benchmark pour comparer single-thread vs multi-thread

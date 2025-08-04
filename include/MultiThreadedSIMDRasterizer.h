@@ -1,12 +1,9 @@
 #pragma once
 
 #include <vector>
-#include <algorithm>
-#include <cmath>
 #include <thread>
 #include <mutex>
 #include <atomic>
-#include <future>
 #include <chrono>
 #include <immintrin.h>  // AVX/SSE
 #include <glm/glm.hpp>

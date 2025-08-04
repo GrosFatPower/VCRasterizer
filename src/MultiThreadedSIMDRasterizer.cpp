@@ -5,6 +5,10 @@
 #include <chrono>
 #include <string>
 #include <random>
+#include <algorithm>
+#include <cmath>
+#include <future>
+#include <glm/gtc/matrix_transform.hpp>
 
 MultiThreadedSIMDRasterizer::MultiThreadedSIMDRasterizer(int w, int h, int numThreads)
 : _ScreenWidth(w)

@@ -2,7 +2,6 @@
 
 #include <iostream>
 #include <iomanip>
-#include <chrono>
 #include <string>
 #include <random>
 #include <algorithm>
@@ -14,11 +13,6 @@ MultiThreadedSIMDRasterizer::MultiThreadedSIMDRasterizer(int w, int h, int numTh
 : _ScreenWidth(w)
 , _ScreenHeight(h)
 {
-  // Initialisation des compteurs de performance
-  _FrameTimes.reserve(FPS_HISTORY_SIZE);
-  _LastFrameTime = std::chrono::high_resolution_clock::now();
-  _StartTime = _LastFrameTime;
-
   _ColorBuffer.resize(_ScreenWidth * _ScreenHeight);
   _DepthBuffer.resize(_ScreenWidth * _ScreenHeight);
 
@@ -123,7 +117,7 @@ void MultiThreadedSIMDRasterizer::TransformTriangles(const std::vector<Triangle>
       tri.area = crossProduct * 0.5f;
 
       // Setup edge functions
-      SetupEdgeFunctions(tri);
+      SetupTriangleData(tri);
 
       // Frustum culling basique
       bool inScreen = false;
@@ -242,8 +236,8 @@ void MultiThreadedSIMDRasterizer::RenderTriangleInTile(const TransformedTriangle
   // Alignement SIMD
   startX = (startX / 8) * 8;
 
-  glm::vec3 depths(tri.screenVertices[0].z, tri.screenVertices[1].z, tri.screenVertices[2].z);
-  glm::vec3 wValues(tri.screenVertices[0].w, tri.screenVertices[1].w, tri.screenVertices[2].w);
+  //glm::vec3 depths(tri.screenVertices[0].z, tri.screenVertices[1].z, tri.screenVertices[2].z);
+  //glm::vec3 wValues(tri.screenVertices[0].w, tri.screenVertices[1].w, tri.screenVertices[2].w);
 
   // Rasterization SIMD par blocs de 8 pixels
   for (int y = startY; y <= endY; ++y)
@@ -257,7 +251,8 @@ void MultiThreadedSIMDRasterizer::RenderTriangleInTile(const TransformedTriangle
       {
         // Interpolation des profondeurs
         SIMD_ALIGN float interpolated_depths[8];
-        InterpolateDepth8x(x + 0.5f, y + 0.5f, tri, depths, wValues, interpolated_depths);
+        //InterpolateDepth8x(x + 0.5f, y + 0.5f, tri, depths, wValues, interpolated_depths);
+        InterpolateDepth8x_InverseZ(x + 0.5f, y + 0.5f, tri, interpolated_depths);
 
         // Z-test et écriture des pixels
         uint32_t mask_array[8];
@@ -272,7 +267,7 @@ void MultiThreadedSIMDRasterizer::RenderTriangleInTile(const TransformedTriangle
             {
               _DepthBuffer[pixelIndex] = interpolated_depths[i];
               _ColorBuffer[pixelIndex] = tri.color;
-              A_PixelsRendered.fetch_add(1);
+              //A_PixelsRendered.fetch_add(1);
             }
           }
         }
@@ -280,7 +275,7 @@ void MultiThreadedSIMDRasterizer::RenderTriangleInTile(const TransformedTriangle
     }
   }
 
-  A_TrianglesProcessed.fetch_add(1);
+  //A_TrianglesProcessed.fetch_add(1);
 }
 
 // Test SIMD de 8 pixels
@@ -347,7 +342,45 @@ void MultiThreadedSIMDRasterizer::InterpolateDepth8x(float startX, float y, cons
   _mm256_store_ps(output, final_depth);
 }
 
-void MultiThreadedSIMDRasterizer::SetupEdgeFunctions(TransformedTriangle& tri)
+void MultiThreadedSIMDRasterizer::InterpolateDepth8x_InverseZ(float startX, float y, const TransformedTriangle& tri, float* output)
+{
+  __m256 x_coords = _mm256_set_ps(startX + 7, startX + 6, startX + 5, startX + 4,    startX + 3, startX + 2, startX + 1, startX);
+  __m256 y_coord = _mm256_set1_ps(y);
+
+  __m256 inv_area = _mm256_set1_ps(1.0f / tri.area);
+
+  // ===== ÉTAPE 1: Calcul des coordonnées barycentriques =====
+  __m256 alpha = _mm256_fmadd_ps(_mm256_broadcast_ss(&tri.edgeA[0]), x_coords, _mm256_fmadd_ps(_mm256_broadcast_ss(&tri.edgeB[0]), y_coord, _mm256_broadcast_ss(&tri.edgeC[0])));
+  alpha = _mm256_mul_ps(alpha, inv_area);
+
+  __m256 beta = _mm256_fmadd_ps(_mm256_broadcast_ss(&tri.edgeA[1]), x_coords, _mm256_fmadd_ps(_mm256_broadcast_ss(&tri.edgeB[1]), y_coord, _mm256_broadcast_ss(&tri.edgeC[1])));
+  beta = _mm256_mul_ps(beta, inv_area);
+
+  __m256 gamma = _mm256_fmadd_ps(_mm256_broadcast_ss(&tri.edgeA[2]), x_coords, _mm256_fmadd_ps(_mm256_broadcast_ss(&tri.edgeB[2]), y_coord, _mm256_broadcast_ss(&tri.edgeC[2])));
+  gamma = _mm256_mul_ps(gamma, inv_area);
+
+  // ===== ÉTAPE 2: Chargement des 1/Z pré-calculés =====
+  __m256 inv_z0 = _mm256_broadcast_ss(&tri.invDepths[0]);  // 1/Z0
+  __m256 inv_z1 = _mm256_broadcast_ss(&tri.invDepths[1]);  // 1/Z1
+  __m256 inv_z2 = _mm256_broadcast_ss(&tri.invDepths[2]);  // 1/Z2
+
+  // ===== ÉTAPE 3: Interpolation linéaire de 1/Z =====
+  __m256 interpolated_inv_z = _mm256_fmadd_ps(alpha, inv_z0, _mm256_fmadd_ps(beta, inv_z1, _mm256_mul_ps(gamma, inv_z2)));
+
+  // ===== ÉTAPE 4: Inversion pour obtenir Z final =====
+  __m256 one = _mm256_set1_ps(1.0f);
+  __m256 final_depth = _mm256_div_ps(one, interpolated_inv_z);
+
+  // Protection contre division par zéro (cas très rare)
+  __m256 zero = _mm256_setzero_ps();
+  __m256 is_valid = _mm256_cmp_ps(interpolated_inv_z, zero, _CMP_GT_OQ);
+  __m256 safe_depth = _mm256_set1_ps(1.0f); // Fallback depth
+  final_depth = _mm256_blendv_ps(safe_depth, final_depth, is_valid);
+
+  _mm256_store_ps(output, final_depth);
+}
+
+void MultiThreadedSIMDRasterizer::SetupTriangleData(TransformedTriangle& tri)
 {
   const auto& v0 = tri.screenVertices[0];
   const auto& v1 = tri.screenVertices[1];
@@ -367,6 +400,11 @@ void MultiThreadedSIMDRasterizer::SetupEdgeFunctions(TransformedTriangle& tri)
   tri.edgeA[2] = v0.y - v1.y;
   tri.edgeB[2] = v1.x - v0.x;
   tri.edgeC[2] = v0.x * v1.y - v1.x * v0.y;
+
+  // Inverses des profondeurs pour interpolation
+  tri.invDepths[0] = (v0.z != 0.0f) ? 1.0f / v0.z : 0.0f;
+  tri.invDepths[1] = (v1.z != 0.0f) ? 1.0f / v1.z : 0.0f;
+  tri.invDepths[2] = (v2.z != 0.0f) ? 1.0f / v2.z : 0.0f;
 }
 
 glm::vec4 MultiThreadedSIMDRasterizer::TransformVertex(const glm::vec3& vertex, const glm::mat4& mvp)
@@ -388,66 +426,19 @@ glm::vec4 MultiThreadedSIMDRasterizer::TransformVertex(const glm::vec3& vertex, 
   return glm::vec4(x, y, z, clipSpace.w);
 }
 
-int MultiThreadedSIMDRasterizer::InitSingleTriangleScene()
+int MultiThreadedSIMDRasterizer::InitScene(const int nbTris)
 {
   _Triangles.clear();
   _Transformed.clear();
 
-  glm::vec3 vertices[3] = {
-      glm::vec3(0.0f, 1.0f, 0.0f),   // Sommet
-      glm::vec3(-1.0f, -1.0f, 0.0f), // Base gauche
-      glm::vec3(1.0f, -1.0f, 0.0f)   // Base droite
-  };
-
-  _Triangles.emplace_back(vertices[0], vertices[1], vertices[2], 0xFF0000FF);
+  LoadTriangles(_Triangles, nbTris);
 
   return 0;
 }
 
-int MultiThreadedSIMDRasterizer::InitMultipleTrianglesScene(const int nbTris)
-{
-    _Triangles.clear();
-    _Transformed.clear();
-
-    static thread_local std::mt19937 gen(std::random_device{}());
-    std::uniform_real_distribution<float> posDist(-1.0f, 1.0f);      // For centroid x/y
-    std::uniform_real_distribution<float> zDist(0.0f, 1.0f);         // For centroid z (depth)
-    std::uniform_real_distribution<float> sizeDist(0.05f, 0.25f);    // Triangle size
-    std::uniform_real_distribution<float> angleDist(0.0f, 2.0f * 3.14159265f); // Orientation
-
-    for (int i = 0; i < nbTris; ++i)
-    {
-        // Random centroid in NDC
-        float cx = posDist(gen);
-        float cy = posDist(gen);
-        float cz = zDist(gen);
-
-        // Random size and orientation
-        float size = sizeDist(gen);
-        float baseAngle = angleDist(gen);
-
-        glm::vec3 vertices[3];
-        for (int v = 0; v < 3; ++v)
-        {
-            float angle = baseAngle + v * (2.0f * 3.14159265f / 3.0f);
-            float r = size * (0.8f + 0.4f * posDist(gen)); // Slightly irregular triangle
-            vertices[v] = glm::vec3(
-                cx + r * std::cos(angle),
-                cy + r * std::sin(angle),
-                cz
-            );
-        }
-
-        uint32_t color = 0xFF000000 | ((i * 25) % 255) << 16 | ((i * 50) % 255) << 8 | ((i * 75) % 255);
-        _Triangles.emplace_back(vertices[0], vertices[1], vertices[2], color);
-    }
-
-    return 0;
-}
-
 void MultiThreadedSIMDRasterizer::RenderRotatingScene(float time)
 {
-  Clear(0xADD8E6FF); // Light blue in RGBA
+  Clear(0xADD8E6FF);
 
   // Matrices de transformation
   glm::mat4 model = glm::rotate(glm::mat4(1.0f), time, glm::vec3(0, 1, 0)); // Rotation Y
@@ -471,12 +462,6 @@ void MultiThreadedSIMDRasterizer::RenderRotatingScene(float time)
 // Fonction principale de rendu
 void MultiThreadedSIMDRasterizer::RenderTriangles(const std::vector<Triangle>& triangles, const glm::mat4& mvp)
 {
-  // Reset des stats
-  A_TrianglesProcessed = 0;
-  A_PixelsRendered = 0;
-
-  auto startT = std::chrono::high_resolution_clock::now();
-
   // 1. Transformation des triangles
   TransformTriangles(triangles, mvp, _Transformed);
 
@@ -495,118 +480,4 @@ void MultiThreadedSIMDRasterizer::RenderTriangles(const std::vector<Triangle>& t
   }
 
   A_RenderingActive = false;
-
-  auto endT = std::chrono::high_resolution_clock::now();
-  auto renderDuration = std::chrono::duration_cast<std::chrono::microseconds>(endT - startT);
-
-  // Mise à jour des statistiques de frame
-  UpdateFrameStats();
-
-  // Stats de performance détaillées (optionnel - peut être activé pour debug)
-  /*std::cout << "Frame " << GetFrameCount() << " - Rendered " << A_TrianglesProcessed.load() << " triangles, "
-            << A_PixelsRendered.load() << " pixels in " << renderDuration.count()
-            << " µs (" << _WorkerThreads.size() << " threads)\n";*/
-}
-
-void MultiThreadedSIMDRasterizer::UpdateFrameStats()
-{
-  std::lock_guard<std::mutex> lock(_StatsMutex);
-
-  auto currentTime = std::chrono::high_resolution_clock::now();
-  auto frameTime = std::chrono::duration<double, std::milli>(currentTime - _LastFrameTime);
-  _LastFrameTime = currentTime;
-
-  // Ajouter le temps de cette frame
-  if (_FrameTimes.size() >= FPS_HISTORY_SIZE)
-    _FrameTimes.erase(_FrameTimes.begin());
-  _FrameTimes.push_back(frameTime.count());
-
-  _FrameCount++;
-
-  // Calculer FPS et temps moyen sur les dernières frames
-  if (!_FrameTimes.empty())
-  {
-    double totalTime = 0.0;
-    for (double time : _FrameTimes)
-      totalTime += time;
-
-    _AvgFrameTime = totalTime / _FrameTimes.size();
-    _CurrentFPS = 1000.0 / _AvgFrameTime; // 1000ms / temps_en_ms = FPS
-  }
-}
-
-// Getters thread-safe pour les stats
-double MultiThreadedSIMDRasterizer::GetCurrentFPS() const
-{
-  std::lock_guard<std::mutex> lock(_StatsMutex);
-  return _CurrentFPS;
-}
-
-double MultiThreadedSIMDRasterizer::MultiThreadedSIMDRasterizer::GetAverageFrameTime() const
-{
-  std::lock_guard<std::mutex> lock(_StatsMutex);
-  return _AvgFrameTime;
-}
-
-double MultiThreadedSIMDRasterizer::GetLastFrameTime() const
-{
-  std::lock_guard<std::mutex> lock(_StatsMutex);
-  return _FrameTimes.empty() ? 0.0 : _FrameTimes.back();
-}
-
-int MultiThreadedSIMDRasterizer::GetFrameCount() const
-{
-  std::lock_guard<std::mutex> lock(_StatsMutex);
-  return _FrameCount;
-}
-
-double MultiThreadedSIMDRasterizer::GetTotalRenderTime() const
-{
-  std::lock_guard<std::mutex> lock(_StatsMutex);
-  auto currentTime = std::chrono::high_resolution_clock::now();
-  auto totalTime = std::chrono::duration<double>(currentTime - _StartTime);
-  return totalTime.count();
-}
-
-// Affichage des stats de performance détaillées
-void MultiThreadedSIMDRasterizer::PrintPerformanceStats() const
-{
-  std::lock_guard<std::mutex> lock(_StatsMutex);
-
-  std::cout << "\n=== Performance Statistics ===\n";
-  std::cout << "Current FPS: " << std::fixed << std::setprecision(1) << _CurrentFPS << "\n";
-  std::cout << "Last Frame Time: " << std::fixed << std::setprecision(2) << GetLastFrameTime() << " ms\n";
-  std::cout << "Average Frame Time: " << std::fixed << std::setprecision(2) << _AvgFrameTime << " ms\n";
-  std::cout << "Total Frames: " << _FrameCount << "\n";
-  std::cout << "Total Runtime: " << std::fixed << std::setprecision(1) << GetTotalRenderTime() << " seconds\n";
-  std::cout << "Triangles Processed: " << A_TrianglesProcessed.load() << "\n";
-  std::cout << "Pixels Rendered: " << A_PixelsRendered.load() << "\n";
-  std::cout << "Threads: " << _WorkerThreads.size() << "\n";
-  std::cout << "==============================\n\n";
-}
-
-void MTRasterizerBenchmark::ComparePerformance(int triangleCount)
-{
-  MultiThreadedSIMDRasterizer mtRasterizer(800, 600, 8); // 8 threads
-
-  std::vector<Triangle> triangles;
-  for (int i = 0; i < triangleCount; ++i)
-  {
-    float angle = i * 0.1f;
-    glm::vec3 v0(sin(angle), cos(angle), 0);
-    glm::vec3 v1(sin(angle + 1), cos(angle + 1), 0);
-    glm::vec3 v2(sin(angle + 2), cos(angle + 2), 0);
-    triangles.emplace_back(v0, v1, v2);
-  }
-
-  glm::mat4 mvp = glm::perspective(glm::radians(45.0f), 800.0f / 600.0f, 0.1f, 100.0f);
-
-  // Test multi-threadé
-  auto start = std::chrono::high_resolution_clock::now();
-  mtRasterizer.Clear();
-  mtRasterizer.RenderTriangles(triangles, mvp);
-  auto end = std::chrono::high_resolution_clock::now();
-
-  auto mtDuration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-  std::cout << "Multi-threaded: " << mtDuration.count() << " microseconds\n";
 }

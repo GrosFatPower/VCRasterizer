@@ -8,6 +8,7 @@
 
 const int WIDTH = 1920;
 const int HEIGHT = 1080;
+const int NB_TRIS = 10000;
 
 // Version avec gestion d'événements plus réaliste
 class FPSCounter {
@@ -66,8 +67,7 @@ int TestSoftwareRasterizer()
 
   SoftwareRasterizer rasterizer(WIDTH, HEIGHT);
 
-  //rasterizer.InitSingleTriangleScene();
-  rasterizer.InitMultipleTrianglesScene();
+  rasterizer.InitScene(NB_TRIS);
 
   FPSCounter fpsCounter;
   sf::Clock clock;
@@ -137,9 +137,7 @@ int TestMultiThreadedSIMDRasterizer()
   int threadCount = std::thread::hardware_concurrency();
   MultiThreadedSIMDRasterizer rasterizer(WIDTH, HEIGHT, threadCount);
 
-  //rasterizer.InitSingleTriangleScene();
-  const int nbTris = 1000;
-  rasterizer.InitMultipleTrianglesScene(nbTris);
+  rasterizer.InitScene(NB_TRIS);
 
   FPSCounter fpsCounter;
   sf::Clock clock;

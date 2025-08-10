@@ -27,10 +27,10 @@ protected:
   void Clear(uint32_t color = 0x000000FF);
 
   // Transformation et culling des triangles en batch
-  void TransformTriangles(const std::vector<Triangle>& triangles, const glm::mat4& mvp, std::vector<TransformedTriangle>& oTransformed);
+  void TransformTriangles(const glm::mat4& mvp);
 
   // Binning des triangles par tuile (avec overlap detection)
-  void BinTrianglesToTiles(const std::vector<TransformedTriangle>& triangles);
+  void BinTrianglesToTiles();
 
   // Worker thread function
   void WorkerThreadFunction();
@@ -51,7 +51,8 @@ protected:
   glm::vec4 TransformVertex(const glm::vec3& vertex, const glm::mat4& mvp);
 
   // Fonction principale de rendu
-  void RenderTriangles(const std::vector<Triangle>& triangles, const glm::mat4& mvp);
+  void RenderTriangles(const glm::mat4& mvp);
+  void RenderTrianglesInBatch(const glm::mat4& mvp);
 
   const uint32_t* GetColorBuffer() const { return _ColorBuffer.data(); }
   int GetWidth() const { return _ScreenWidth; }

@@ -7,7 +7,8 @@
 #define SIMD_ALIGN alignas(32)
 //#define SIMD_ALIGN
 
-struct Triangle {
+struct Triangle
+{
   glm::vec3 vertices[3];
   uint32_t color;
   uint32_t materialId;
@@ -20,7 +21,8 @@ struct Triangle {
   }
 };
 
-struct TransformedTriangle {
+struct TransformedTriangle
+{
   glm::vec4 screenVertices[3];
   uint32_t color;
   float area;

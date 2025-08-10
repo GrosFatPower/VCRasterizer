@@ -15,9 +15,10 @@
 
 const int WIDTH = 1920;
 const int HEIGHT = 1080;
-const int NB_TRIS = 1000;
 const int THREAD_COUNT = std::thread::hardware_concurrency();
-static short S_TestNum = 0;
+
+static int S_NbTriangles = 1000;
+static short S_TestNum = 1;
 
 std::unique_ptr<Renderer> ReloadRasterizer(int testNum, int width, int height, int threadCount)
 {
@@ -55,8 +56,13 @@ int main()
     return -1;
   }
 
-  sf::Text infoText(font, "Triangle rasterizer", 16);
-  infoText.setPosition({5., 5.});
+  std::string headerTextStr = "Triangle rasterizer";
+  sf::Text headerText(font, headerTextStr, 16);
+  headerText.setPosition({5., 5.});
+
+  std::string nbTrisTextStr = "Nb Triangles = " + std::to_string(S_NbTriangles) + " (PageUp : x2, PageDown : /2)";
+  sf::Text nbTrisText(font, nbTrisTextStr, 16);
+  nbTrisText.setPosition({ 5., 25. });
 
   sf::Sprite sprite(texture);
 
@@ -90,6 +96,18 @@ int main()
           S_TestNum = 1;
           reloadRenderer = true;
         }
+        else if (keyEvent && keyEvent->code == sf::Keyboard::Key::PageUp)
+        {
+          S_NbTriangles *= 2;
+          reloadScene = true;
+        }
+        else if (keyEvent && keyEvent->code == sf::Keyboard::Key::PageDown)
+        {
+          S_NbTriangles /= 2;
+          if (S_NbTriangles < 1)
+            S_NbTriangles = 1;
+          reloadScene = true;
+        }
       }
     }
 
@@ -103,9 +121,11 @@ int main()
       }
 
       if ( S_TestNum == 0 )
-        infoText = sf::Text(font, "Software Rasterizer - Press F2 for SIMD", 16);
+        headerTextStr = "Single threaded Rasterizer - Press F2 for SIMD";
       else if (S_TestNum == 1 )
-        infoText = sf::Text(font, "Multi-Threaded SIMD Rasterizer - Press F1 for Software", 16);
+        headerTextStr = "Multi-Threaded SIMD Rasterizer - Press F1 for Software";
+      headerText = sf::Text(font, headerTextStr, 16);
+      headerText.setPosition({ 5., 5. });
 
       reloadRenderer = false;
       reloadScene = true;
@@ -114,7 +134,11 @@ int main()
 
     if ( reloadScene )
     {
-      rasterizer -> InitScene(NB_TRIS);
+      nbTrisTextStr = "Nb Triangles = " + std::to_string(S_NbTriangles) + " (PageUp : x2, PageDown : /2)";
+      nbTrisText = sf::Text(font, nbTrisTextStr, 16);
+      nbTrisText.setPosition({ 5., 25. });
+
+      rasterizer -> InitScene(S_NbTriangles);
       reloadScene = false;
     }
 
@@ -126,7 +150,8 @@ int main()
 
     window.clear();
     window.draw(sprite);
-    window.draw(infoText);
+    window.draw(headerText);
+    window.draw(nbTrisText);
     window.display();
 
     window.setTitle("Vibe Coded Rasterizer - FPS: " + std::to_string(static_cast<int>(fpsCounter.getFPS())));

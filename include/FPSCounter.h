@@ -9,7 +9,7 @@ private:
   std::chrono::high_resolution_clock::time_point lastUpdate;
   std::vector<double> frameTimes;
   double currentFPS = 0.0;
-  static constexpr int HISTORY_SIZE = 30;
+  static constexpr int HISTORY_SIZE = 60;
 
 public:
   FPSCounter() : lastUpdate(std::chrono::high_resolution_clock::now()) {

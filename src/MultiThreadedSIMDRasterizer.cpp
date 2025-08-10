@@ -60,7 +60,7 @@ void MultiThreadedSIMDRasterizer::Clear(uint32_t color)
 {
   // Clear en parallèle par chunks
   const int chunkSize = 64000; // ~256KB chunks
-  int numChunks = (_ColorBuffer.size() + chunkSize - 1) / chunkSize;
+  int numChunks = ((int)_ColorBuffer.size() + chunkSize - 1) / chunkSize;
 
   std::vector<std::future<void>> futures;
   for (int i = 0; i < numChunks; ++i)
@@ -85,26 +85,23 @@ void MultiThreadedSIMDRasterizer::Clear(uint32_t color)
 }
 
 // Transformation et culling des triangles en batch
-void MultiThreadedSIMDRasterizer::TransformTriangles(const std::vector<Triangle>& triangles, const glm::mat4& mvp, std::vector<TransformedTriangle> & oTransformed)
+void MultiThreadedSIMDRasterizer::TransformTriangles(const glm::mat4& mvp)
 {
-  oTransformed.clear();
-  oTransformed.reserve(triangles.size());
-
   // Traitement par batch pour optimiser le cache
   const int batchSize = 64;
-  for (size_t i = 0; i < triangles.size(); i += batchSize)
+  for (size_t i = 0; i < _Triangles.size(); i += batchSize)
   {
-    size_t end = std::min(i + batchSize, triangles.size());
+    size_t end = std::min(i + batchSize, _Triangles.size());
 
     for (size_t j = i; j < end; ++j)
     {
-      TransformedTriangle tri;
-      tri.color = triangles[j].color;
+      TransformedTriangle & tri = _Transformed[j];
+      tri.color = _Triangles[j].color;
       tri.valid = false;
 
       // Transformation des vertices
       for (int v = 0; v < 3; ++v)
-        tri.screenVertices[v] = TransformVertex(triangles[j].vertices[v], mvp);
+        tri.screenVertices[v] = TransformVertex(_Triangles[j].vertices[v], mvp);
 
       // Backface culling
       glm::vec2 edge1 = glm::vec2(tri.screenVertices[1].x - tri.screenVertices[0].x,
@@ -135,23 +132,85 @@ void MultiThreadedSIMDRasterizer::TransformTriangles(const std::vector<Triangle>
       }
 
       if (inScreen)
-      {
         tri.valid = true;
-        oTransformed.push_back(tri);
-      }
     }
   }
 }
 
+void MultiThreadedSIMDRasterizer::RenderTrianglesInBatch(const glm::mat4& mvp)
+{
+  const int batchSize = 64;
+  const int numBatches = (_Triangles.size() + batchSize - 1) / batchSize;
+
+  // Création des futures pour chaque batch
+  std::vector<std::future<void>> futures;
+  futures.reserve(numBatches);
+
+  for (size_t batchStart = 0; batchStart < _Triangles.size(); batchStart += batchSize)
+  {
+    futures.push_back(std::async(std::launch::async, [this, batchStart, batchSize, &mvp]() {
+      size_t end = std::min(batchStart + batchSize, _Triangles.size());
+
+      for (size_t j = batchStart; j < end; ++j)
+      {
+        TransformedTriangle& tri = _Transformed[j];
+        tri.color = _Triangles[j].color;
+        tri.valid = false;
+
+        // Transformation des vertices
+        for (int v = 0; v < 3; ++v)
+          tri.screenVertices[v] = TransformVertex(_Triangles[j].vertices[v], mvp);
+
+        // Backface culling
+        glm::vec2 edge1 = glm::vec2(tri.screenVertices[1].x - tri.screenVertices[0].x,
+          tri.screenVertices[1].y - tri.screenVertices[0].y);
+        glm::vec2 edge2 = glm::vec2(tri.screenVertices[2].x - tri.screenVertices[0].x,
+          tri.screenVertices[2].y - tri.screenVertices[0].y);
+
+        float crossProduct = edge1.x * edge2.y - edge1.y * edge2.x;
+
+        if (_BackfaceCullingEnabled && crossProduct <= 0)
+          continue;
+
+        tri.area = crossProduct * 0.5f;
+
+        // Setup edge functions
+        SetupTriangleData(tri);
+
+        // Frustum culling basique
+        bool inScreen = false;
+        for (int v = 0; v < 3; ++v)
+        {
+          if (tri.screenVertices[v].x >= 0 && tri.screenVertices[v].x < _ScreenWidth &&
+            tri.screenVertices[v].y >= 0 && tri.screenVertices[v].y < _ScreenHeight)
+          {
+            inScreen = true;
+            break;
+          }
+        }
+
+        if (inScreen)
+          tri.valid = true;
+      }
+      }));
+  }
+
+  // Attente de la fin du traitement de tous les batches
+  for (auto& future : futures)
+  {
+    future.wait();
+  }
+}
+
 // Binning des triangles par tuile (avec overlap detection)
-void MultiThreadedSIMDRasterizer::BinTrianglesToTiles(const std::vector<TransformedTriangle>& triangles)
+void MultiThreadedSIMDRasterizer::BinTrianglesToTiles()
 {
   // Clear les listes de triangles des tuiles
   for (auto& tile : _Tiles)
     tile.triangles.clear();
 
   // Pour chaque triangle, déterminer quelles tuiles il intersecte
-  for (const auto& tri : triangles)
+  for (const auto& tri : _Transformed)
   {
     if (!tri.valid)
       continue;
@@ -441,6 +500,8 @@ int MultiThreadedSIMDRasterizer::InitScene(const int nbTris)
 
   Renderer::InitScene(nbTris);
 
+  _Transformed.resize(nbTris);
+
   return 0;
 }
 
@@ -464,17 +525,17 @@ void MultiThreadedSIMDRasterizer::RenderRotatingScene(float time)
 
   glm::mat4 mvp = projection * view * model;
 
-  RenderTriangles(_Triangles, mvp);
+  RenderTriangles(mvp);
 }
 
 // Fonction principale de rendu
-void MultiThreadedSIMDRasterizer::RenderTriangles(const std::vector<Triangle>& triangles, const glm::mat4& mvp)
+void MultiThreadedSIMDRasterizer::RenderTriangles(const glm::mat4& mvp)
 {
   // 1. Transformation des triangles
-  TransformTriangles(triangles, mvp, _Transformed);
+  RenderTrianglesInBatch(mvp);
 
   // 2. Binning des triangles aux tuiles
-  BinTrianglesToTiles(_Transformed);
+  BinTrianglesToTiles();
 
   // 3. Rendu multi-threadé
   A_NextTileIndex = 0;

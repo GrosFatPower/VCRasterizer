@@ -1,23 +1,53 @@
 #pragma once
 
 #include "DatatTypes.h"
+#include "Renderer.h"
 #include <vector>
 #include <algorithm>
 #include <cmath>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
-class SoftwareRasterizer {
+class SoftwareRasterizer : public Renderer
+{
+  // Classe de rasterisation logicielle
+  // Utilise un Z-buffer pour le test de profondeur
+  // Supporte la transformation de vertex et le rendu de triangles
 
 public:
-  SoftwareRasterizer(int w, int h) : width(w), height(h) {
-    colorBuffer.resize(width * height);
-    depthBuffer.resize(width * height);
+  SoftwareRasterizer(int w, int h) : Renderer(w, h) {}
+
+  // Rendu d'un triangle en rotation
+  virtual void RenderRotatingScene(float time)
+  {
+    clear(0xADD8E6FF);
+
+    // Matrices de transformation
+    glm::mat4 model = glm::rotate(glm::mat4(1.0f), time, glm::vec3(0, 1, 0)); // Rotation Y
+    glm::mat4 view = glm::lookAt(
+      glm::vec3(0, 0, 3),  // Position caméra
+      glm::vec3(0, 0, 0),  // Point regardé
+      glm::vec3(0, 1, 0)   // Up vector
+    );
+
+    glm::mat4 projection = glm::perspective(
+      glm::radians(45.0f),           // FOV
+      (float)_ScreenWidth / (float)_ScreenHeight,  // Aspect ratio
+      0.1f, 100.0f                   // Near/Far planes
+    );
+
+    glm::mat4 mvp = projection * view * model;
+
+    // Rendu du triangle
+    for (const auto& tri : _Triangles)
+      drawTriangle(tri.vertices[0], tri.vertices[1], tri.vertices[2], mvp, tri.color);
   }
 
+protected:
+
   void clear(uint32_t color = 0x000000FF) {
-    std::fill(colorBuffer.begin(), colorBuffer.end(), color);
-    std::fill(depthBuffer.begin(), depthBuffer.end(), std::numeric_limits<float>::max());
+    std::fill(_ColorBuffer.begin(), _ColorBuffer.end(), color);
+    std::fill(_DepthBuffer.begin(), _DepthBuffer.end(), std::numeric_limits<float>::max());
   }
 
   // Transformation d'un vertex du world space vers le screen space
@@ -32,8 +62,8 @@ public:
     }
 
     // Transformation viewport (NDC [-1,1] -> screen coordinates)
-    float x = (clipSpace.x + 1.0f) * 0.5f * width;
-    float y = (1.0f - clipSpace.y) * 0.5f * height; // Y inversé
+    float x = (clipSpace.x + 1.0f) * 0.5f * _ScreenWidth;
+    float y = (1.0f - clipSpace.y) * 0.5f * _ScreenHeight; // Y inversé
     float z = clipSpace.z; // Garder Z pour le depth test
 
     return glm::vec4(x, y, z, clipSpace.w);
@@ -92,9 +122,9 @@ public:
 
     // Bounding box du triangle
     int minX = std::max(0, (int)std::floor(std::min({ sv0.x, sv1.x, sv2.x })));
-    int maxX = std::min(width - 1, (int)std::ceil(std::max({ sv0.x, sv1.x, sv2.x })));
+    int maxX = std::min(_ScreenWidth - 1, (int)std::ceil(std::max({ sv0.x, sv1.x, sv2.x })));
     int minY = std::max(0, (int)std::floor(std::min({ sv0.y, sv1.y, sv2.y })));
-    int maxY = std::min(height - 1, (int)std::ceil(std::max({ sv0.y, sv1.y, sv2.y })));
+    int maxY = std::min(_ScreenHeight - 1, (int)std::ceil(std::max({ sv0.y, sv1.y, sv2.y })));
 
     // Rasterization
     for (int y = minY; y <= maxY; ++y) {
@@ -112,61 +142,13 @@ public:
           float depth = interpolateDepth(barycentrics, depths, wValues);
 
           // Test de profondeur
-          int pixelIndex = y * width + x;
-          if (depth < depthBuffer[pixelIndex]) {
-            depthBuffer[pixelIndex] = depth;
-            colorBuffer[pixelIndex] = color;
+          int pixelIndex = y * _ScreenWidth + x;
+          if (depth < _DepthBuffer[pixelIndex]) {
+            _DepthBuffer[pixelIndex] = depth;
+            _ColorBuffer[pixelIndex] = color;
           }
         }
       }
     }
   }
-
-  // Rendu d'un triangle en rotation
-  void renderRotatingScene(float time)
-  {
-    clear(0xADD8E6FF);
-
-    // Matrices de transformation
-    glm::mat4 model = glm::rotate(glm::mat4(1.0f), time, glm::vec3(0, 1, 0)); // Rotation Y
-    glm::mat4 view = glm::lookAt(
-      glm::vec3(0, 0, 3),  // Position caméra
-      glm::vec3(0, 0, 0),  // Point regardé
-      glm::vec3(0, 1, 0)   // Up vector
-    );
-
-    glm::mat4 projection = glm::perspective(
-      glm::radians(45.0f),           // FOV
-      (float)width / (float)height,  // Aspect ratio
-      0.1f, 100.0f                   // Near/Far planes
-    );
-
-    glm::mat4 mvp = projection * view * model;
-
-    // Rendu du triangle
-    for ( const auto & tri : tris ) 
-      drawTriangle(tri.vertices[0], tri.vertices[1], tri.vertices[2], mvp, tri.color);
-  }
-
-  int InitScene(const int nbTris = 100)
-  {
-    tris.clear();
-
-    LoadTriangles(tris, nbTris);
-
-    return 0;
-  }
-
-  // Accès au buffer pour affichage
-  const uint32_t* getColorBuffer() const { return colorBuffer.data(); }
-  int getWidth() const { return width; }
-  int getHeight() const { return height; }
-
-private:
-  int width, height;
-  std::vector<uint32_t> colorBuffer;  // RGBA format
-  std::vector<float> depthBuffer;     // Z-buffer
-
-  // Scene
-  std::vector<Triangle> tris;
 };

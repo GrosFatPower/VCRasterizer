@@ -1,6 +1,7 @@
 #pragma once
 
 #include "DatatTypes.h"
+#include "Renderer.h"
 #include <vector>
 #include <thread>
 #include <mutex>
@@ -10,16 +11,20 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
-class MultiThreadedSIMDRasterizer
+class MultiThreadedSIMDRasterizer : public Renderer
 {
 public:
   MultiThreadedSIMDRasterizer(int w, int h, int numThreads = 0);
 
   ~MultiThreadedSIMDRasterizer();
 
-  void Clear(uint32_t color = 0x000000FF);
+  virtual int InitScene(const int nbTris = 100);
 
-  int InitScene(const int nbTris = 100);
+  virtual void RenderRotatingScene(float time);
+
+protected:
+
+  void Clear(uint32_t color = 0x000000FF);
 
   // Transformation et culling des triangles en batch
   void TransformTriangles(const std::vector<Triangle>& triangles, const glm::mat4& mvp, std::vector<TransformedTriangle>& oTransformed);
@@ -48,8 +53,6 @@ public:
   // Fonction principale de rendu
   void RenderTriangles(const std::vector<Triangle>& triangles, const glm::mat4& mvp);
 
-  void RenderRotatingScene(float time);
-
   const uint32_t* GetColorBuffer() const { return _ColorBuffer.data(); }
   int GetWidth() const { return _ScreenWidth; }
   int GetHeight() const { return _ScreenHeight; }
@@ -57,24 +60,20 @@ public:
   void SetBackfaceCullingEnabled(bool enabled) { _BackfaceCullingEnabled = enabled; }
 
 private:
-  int _ScreenWidth, _ScreenHeight;
   int _TileCountX, _TileCountY;
-
-  std::vector<uint32_t> _ColorBuffer;
-  std::vector<float> _DepthBuffer;
   std::vector<Tile> _Tiles;
 
   // Thread pool
   std::vector<std::thread> _WorkerThreads;
   std::atomic<int> A_NextTileIndex{ 0 };
   std::atomic<bool> A_RenderingActive{ false };
+  std::atomic<bool> A_ThreadsShouldRun{ true };
   std::condition_variable _RenderCV;
   std::mutex _RenderMutex;
   std::condition_variable _TilesDoneCV;
   std::mutex _TilesDoneMutex;
 
   // Scene
-  std::vector<Triangle> _Triangles;
   std::vector<TransformedTriangle> _Transformed;
 
   bool _BackfaceCullingEnabled = true;

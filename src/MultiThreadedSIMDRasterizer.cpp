@@ -10,12 +10,8 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 MultiThreadedSIMDRasterizer::MultiThreadedSIMDRasterizer(int w, int h, int numThreads)
-: _ScreenWidth(w)
-, _ScreenHeight(h)
+: Renderer(w, h)
 {
-  _ColorBuffer.resize(_ScreenWidth * _ScreenHeight);
-  _DepthBuffer.resize(_ScreenWidth * _ScreenHeight);
-
   // Calcul du nombre de tuiles
   _TileCountX = (_ScreenWidth + TILE_SIZE - 1) / TILE_SIZE;
   _TileCountY = (_ScreenHeight + TILE_SIZE - 1) / TILE_SIZE;
@@ -45,7 +41,14 @@ MultiThreadedSIMDRasterizer::MultiThreadedSIMDRasterizer(int w, int h, int numTh
 
 MultiThreadedSIMDRasterizer::~MultiThreadedSIMDRasterizer()
 {
-  A_RenderingActive = false;
+  {
+    std::unique_lock<std::mutex> lock(_RenderMutex);
+    A_ThreadsShouldRun = false; // Signal threads to exit
+    A_RenderingActive = false;
+  }
+  _RenderCV.notify_all(); // Wake up all threads
+
+  // Wait for all threads to finish
   for (auto& thread : _WorkerThreads)
   {
     if (thread.joinable())
@@ -192,7 +195,13 @@ void MultiThreadedSIMDRasterizer::WorkerThreadFunction()
   while (true)
   {
     std::unique_lock<std::mutex> lock(_RenderMutex);
-    _RenderCV.wait(lock, [this] { return A_RenderingActive.load(); });
+    _RenderCV.wait(lock, [this] { 
+      return A_RenderingActive.load() || !A_ThreadsShouldRun; // Check for exit condition
+    });
+
+    // Exit thread if shutdown is requested
+    if (!A_ThreadsShouldRun)
+      break;
 
     while (A_RenderingActive.load())
     {
@@ -428,10 +437,9 @@ glm::vec4 MultiThreadedSIMDRasterizer::TransformVertex(const glm::vec3& vertex, 
 
 int MultiThreadedSIMDRasterizer::InitScene(const int nbTris)
 {
-  _Triangles.clear();
   _Transformed.clear();
 
-  LoadTriangles(_Triangles, nbTris);
+  Renderer::InitScene(nbTris);
 
   return 0;
 }

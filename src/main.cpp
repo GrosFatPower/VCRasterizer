@@ -1,126 +1,40 @@
 // src/main.cpp - Compatible SFML 3.0
 #include <SFML/Graphics.hpp>
+#include <SFML/Window/Keyboard.hpp>
+#include <SFML/Graphics/Font.hpp>
+#include <SFML/Graphics/Text.hpp>
+#include <SFML/Graphics/Rect.hpp>
 #include <iostream>
 #include <optional>
+#include <memory>
+#include <string>
 
+#include "FPSCounter.h"
 #include "SoftwareRasterizer.h"
 #include "MultiThreadedSIMDRasterizer.h"
 
 const int WIDTH = 1920;
 const int HEIGHT = 1080;
-const int NB_TRIS = 10000;
+const int NB_TRIS = 1000;
+const int THREAD_COUNT = std::thread::hardware_concurrency();
+static short S_TestNum = 0;
 
-// Version avec gestion d'événements plus réaliste
-class FPSCounter {
-private:
-  std::chrono::high_resolution_clock::time_point lastUpdate;
-  std::vector<double> frameTimes;
-  double currentFPS = 0.0;
-  static constexpr int HISTORY_SIZE = 30;
-
-public:
-  FPSCounter() : lastUpdate(std::chrono::high_resolution_clock::now()) {
-    frameTimes.reserve(HISTORY_SIZE);
-  }
-
-  void update() {
-    auto now = std::chrono::high_resolution_clock::now();
-    auto deltaTime = std::chrono::duration<double, std::milli>(now - lastUpdate);
-    lastUpdate = now;
-
-    if (frameTimes.size() >= HISTORY_SIZE) {
-      frameTimes.erase(frameTimes.begin());
-    }
-    frameTimes.push_back(deltaTime.count());
-
-    if (!frameTimes.empty()) {
-      double avgTime = 0.0;
-      for (double time : frameTimes) {
-        avgTime += time;
-      }
-      avgTime /= frameTimes.size();
-      currentFPS = 1000.0 / avgTime;
-    }
-  }
-
-  double getFPS() const { return currentFPS; }
-  double getLastFrameTime() const {
-    return frameTimes.empty() ? 0.0 : frameTimes.back();
-  }
-};
-
-
-int TestSoftwareRasterizer()
+std::unique_ptr<Renderer> ReloadRasterizer(int testNum, int width, int height, int threadCount)
 {
-  // SFML 3.0: VideoMode prend maintenant un sf::Vector2u
-  sf::RenderWindow window(sf::VideoMode({ WIDTH, HEIGHT }), "Vibe Coded Rasterizer");
-  window.setVerticalSyncEnabled(false);
-
-  // SFML 3.0: Utiliser le constructeur d'Image au lieu de create()
-  sf::Image image({ WIDTH, HEIGHT }, sf::Color::Red);
-
-  sf::Texture texture;
-  if (!texture.loadFromImage(image)) {
-    std::cerr << "Erreur lors du chargement de la texture" << std::endl;
-    return -1;
-  }
-
-  SoftwareRasterizer rasterizer(WIDTH, HEIGHT);
-
-  rasterizer.InitScene(NB_TRIS);
-
-  FPSCounter fpsCounter;
-  sf::Clock clock;
-  float time = 0.0f;
-  //const float deltaTime = 0.016f; // ~60 FPS
-  //bool showDetailedStats = false;
-
-  sf::Sprite sprite(texture);
-
-  while ( window.isOpen() )
+  if (testNum == 0)
   {
-    // SFML 3.0: pollEvent() retourne maintenant un std::optional<sf::Event>
-    while (std::optional<sf::Event> event = window.pollEvent())
-    {
-      if (event->is<sf::Event::Closed>())
-        window.close();
-    }
-
-    rasterizer.renderRotatingScene(time);
-    fpsCounter.update();
-
-    const uint32_t* pixels = rasterizer.getColorBuffer();
-    texture.update(reinterpret_cast<const std::uint8_t*>(pixels));
-
-    window.clear();
-    window.draw(sprite);
-    window.display();
-
-    // Affichage FPS compact en continu
-    //std::cout << "FPS: " << std::setw(6) << std::fixed << std::setprecision(1)
-    //  << fpsCounter.getFPS()
-    //  << " | " << std::setw(6) << std::fixed << std::setprecision(2)
-    //  << fpsCounter.getLastFrameTime() << "ms | "
-    //  //<< "Triangles: " << rasterizer.trianglesProcessed.load()
-    //  << "     \r" << std::flush;
-
-    window.setTitle("Vibe Coded Rasterizer - FPS: " + std::to_string(static_cast<int>(fpsCounter.getFPS())));
-
-    // Stats détaillées si activées
-    //if (showDetailedStats && rasterizer.getFrameCount() % 60 == 0) {
-    //  std::cout << std::endl;
-    //  rasterizer.printPerformanceStats();
-    //}
-
-    sf::Time elapsed = clock.restart();
-    float deltaTime = elapsed.asSeconds();
-    time += deltaTime;
+    std::cout << "Test Software Rasterizer" << std::endl;
+    return std::make_unique<SoftwareRasterizer>(width, height);
   }
-
-  return 0;
+  else if (testNum == 1)
+  {
+    std::cout << "Test Multi-Threaded SIMD Rasterizer" << std::endl;
+    return std::make_unique<MultiThreadedSIMDRasterizer>(width, height, threadCount);
+  }
+  return nullptr;
 }
 
-int TestMultiThreadedSIMDRasterizer()
+int main()
 {
   // SFML 3.0: VideoMode prend maintenant un sf::Vector2u
   sf::RenderWindow window(sf::VideoMode({ WIDTH, HEIGHT }), "Vibe Coded Multi-Threaded Rasterizer");
@@ -134,75 +48,93 @@ int TestMultiThreadedSIMDRasterizer()
     return -1;
   }
 
-  int threadCount = std::thread::hardware_concurrency();
-  MultiThreadedSIMDRasterizer rasterizer(WIDTH, HEIGHT, threadCount);
+  sf::Font font;
+  if (!font.openFromFile("../assets/arial.ttf"))
+  {
+    std::cout << "Unable to load arial.ttf" << std::endl;
+    return -1;
+  }
 
-  rasterizer.InitScene(NB_TRIS);
+  sf::Text infoText(font, "Triangle rasterizer", 16);
+  infoText.setPosition({5., 5.});
+
+  sf::Sprite sprite(texture);
+
+  std::unique_ptr<Renderer> rasterizer;
 
   FPSCounter fpsCounter;
   sf::Clock clock;
   float time = 0.0f;
-  //const float deltaTime = 0.016f; // ~60 FPS
-  //bool showDetailedStats = false;
 
-  sf::Sprite sprite(texture);
-  while ( window.isOpen() )
+  bool reloadRenderer = true;
+  bool reloadScene = true;
+
+  while (window.isOpen())
   {
     // SFML 3.0: pollEvent() retourne maintenant un std::optional<sf::Event>
     while (std::optional<sf::Event> event = window.pollEvent())
     {
       if (event->is<sf::Event::Closed>())
         window.close();
+
+      if (event->is<sf::Event::KeyPressed>())
+      {
+        auto keyEvent = event -> getIf<sf::Event::KeyPressed>();
+        if (keyEvent && keyEvent->code == sf::Keyboard::Key::F1)
+        {
+          S_TestNum = 0;
+          reloadRenderer = true;
+        }
+        else if (keyEvent && keyEvent->code == sf::Keyboard::Key::F2)
+        {
+          S_TestNum = 1;
+          reloadRenderer = true;
+        }
+      }
     }
-    rasterizer.RenderRotatingScene(time);
+
+    if ( reloadRenderer )
+    {
+      rasterizer = ReloadRasterizer(S_TestNum, WIDTH, HEIGHT, THREAD_COUNT);
+      if (!rasterizer)
+      {
+        std::cout << "Unable to initialize the renderer" << std::endl;
+        return -1;
+      }
+
+      if ( S_TestNum == 0 )
+        infoText = sf::Text(font, "Software Rasterizer - Press F2 for SIMD", 16);
+      else if (S_TestNum == 1 )
+        infoText = sf::Text(font, "Multi-Threaded SIMD Rasterizer - Press F1 for Software", 16);
+
+      reloadRenderer = false;
+      reloadScene = true;
+      //time = 0.0f;
+    }
+
+    if ( reloadScene )
+    {
+      rasterizer -> InitScene(NB_TRIS);
+      reloadScene = false;
+    }
+
+    rasterizer -> RenderRotatingScene(time);
     fpsCounter.update();
 
-    const uint32_t* pixels = rasterizer.GetColorBuffer();
+    const uint32_t* pixels = rasterizer -> GetColorBuffer();
     texture.update(reinterpret_cast<const std::uint8_t*>(pixels));
 
     window.clear();
     window.draw(sprite);
+    window.draw(infoText);
     window.display();
 
-    // Affichage FPS compact en continu
-    //std::cout << "FPS: " << std::setw(6) << std::fixed << std::setprecision(1)
-    //  << fpsCounter.getFPS()
-    //  << " | " << std::setw(6) << std::fixed << std::setprecision(2)
-    //  << fpsCounter.getLastFrameTime() << "ms | "
-    //  //<< "Triangles: " << rasterizer.trianglesProcessed.load()
-    //  << "     \r" << std::flush;
-
     window.setTitle("Vibe Coded Rasterizer - FPS: " + std::to_string(static_cast<int>(fpsCounter.getFPS())));
-
-    // Stats détaillées si activées
-    //if (showDetailedStats && rasterizer.getFrameCount() % 60 == 0) {
-    //  std::cout << std::endl;
-    //  rasterizer.printPerformanceStats();
-    //}
 
     sf::Time elapsed = clock.restart();
     float deltaTime = elapsed.asSeconds();
     time += deltaTime;
   }
+
   return 0;
-}
-
-int main()
-{
-  static short testNum = 1;
-
-  if ( testNum == 0 )
-  {
-    std::cout << "Test Software Rasterizer" << std::endl;
-    testNum++;
-    return TestSoftwareRasterizer();
-  }
-  else if ( testNum == 1 )
-  {
-    std::cout << "Test Multi-Threaded SIMD Rasterizer" << std::endl;
-    testNum++;
-    return TestMultiThreadedSIMDRasterizer();
-  }
-
-  return 1;
 }

@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 
 #define SIMD_ALIGN alignas(32)
+//#define SIMD_ALIGN
 
 struct Triangle {
   glm::vec3 vertices[3];

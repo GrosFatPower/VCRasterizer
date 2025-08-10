@@ -29,6 +29,14 @@ public:
   const uint32_t* GetColorBuffer() const { return _ColorBuffer.data(); }
   int GetWidth() const { return _ScreenWidth; }
   int GetHeight() const { return _ScreenHeight; }
+
+  const std::vector<Triangle>& GetTriangles() const { return _Triangles; }
+  virtual void SetTriangles(const std::vector<Triangle>& triangles) { _Triangles = triangles; }
+
+  bool GetBackfaceCullingEnabled() const { return _EnableBackfaceCulling; }
+  bool GetEnableSIMD() const { return _EnableSIMD; }
+  void SetBackfaceCullingEnabled(bool enabled) { _EnableBackfaceCulling = enabled; }
+  void SetEnableSIMD(bool enabled) { _EnableSIMD = enabled; }
   
 protected:
   int _ScreenWidth, _ScreenHeight;
@@ -38,4 +46,7 @@ protected:
 
   // Scene
   std::vector<Triangle> _Triangles;
+
+  bool _EnableBackfaceCulling = true;
+  bool _EnableSIMD = true;
 };

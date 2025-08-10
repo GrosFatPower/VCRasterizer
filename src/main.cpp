@@ -64,6 +64,10 @@ int main()
   sf::Text nbTrisText(font, nbTrisTextStr, 16);
   nbTrisText.setPosition({ 5., 25. });
 
+  std::string optionsTextStr = "S : toggle SIMD, C : toggle backFace culling, SPACE : toggle pause";
+  sf::Text optionsText(font, optionsTextStr, 16);
+  optionsText.setPosition({ 5., 45. });
+
   sf::Sprite sprite(texture);
 
   std::unique_ptr<Renderer> rasterizer;
@@ -71,6 +75,7 @@ int main()
   FPSCounter fpsCounter;
   sf::Clock clock;
   float time = 0.0f;
+  bool pause = false;
 
   bool reloadRenderer = true;
   bool reloadScene = true;
@@ -108,11 +113,37 @@ int main()
             S_NbTriangles = 1;
           reloadScene = true;
         }
+        else if (keyEvent && keyEvent->code == sf::Keyboard::Key::S && rasterizer)
+        {
+          rasterizer -> SetEnableSIMD(!rasterizer->GetEnableSIMD());
+          if ( rasterizer -> GetEnableSIMD() )
+            std::cout << "SIMD : Enabled" << std::endl;
+          else
+            std::cout << "SIMD : Disabled" << std::endl;
+        }
+        else if (keyEvent && keyEvent->code == sf::Keyboard::Key::C && rasterizer)
+        {
+          rasterizer->SetBackfaceCullingEnabled(!rasterizer->GetBackfaceCullingEnabled());
+          if (rasterizer -> GetBackfaceCullingEnabled())
+            std::cout << "BackfaceCulling : Enabled" << std::endl;
+          else
+            std::cout << "BackfaceCulling : Disabled" << std::endl;
+        }
+        else if (keyEvent && keyEvent->code == sf::Keyboard::Key::Space)
+        {
+          pause = !pause;
+          if (pause)
+            std::cout << "Paused" << std::endl;
+          else
+            std::cout << "Resumed" << std::endl;
+        }
       }
     }
 
     if ( reloadRenderer )
     {
+      const std::vector<Triangle> triangles = rasterizer ? rasterizer->GetTriangles() : std::vector<Triangle>();
+
       rasterizer = ReloadRasterizer(S_TestNum, WIDTH, HEIGHT, THREAD_COUNT);
       if (!rasterizer)
       {
@@ -128,8 +159,10 @@ int main()
       headerText.setPosition({ 5., 5. });
 
       reloadRenderer = false;
-      reloadScene = true;
-      //time = 0.0f;
+      if ( !reloadScene && ( triangles.size() > 0 ) )
+        rasterizer -> SetTriangles(triangles);
+      else
+        reloadScene = true;
     }
 
     if ( reloadScene )
@@ -152,13 +185,16 @@ int main()
     window.draw(sprite);
     window.draw(headerText);
     window.draw(nbTrisText);
+    if ( S_TestNum == 1 )
+      window.draw(optionsText);
     window.display();
 
     window.setTitle("Vibe Coded Rasterizer - FPS: " + std::to_string(static_cast<int>(fpsCounter.getFPS())));
 
     sf::Time elapsed = clock.restart();
     float deltaTime = elapsed.asSeconds();
-    time += deltaTime;
+    if ( !pause)
+      time += deltaTime;
   }
 
   return 0;

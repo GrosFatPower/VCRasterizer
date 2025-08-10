@@ -39,10 +39,12 @@ protected:
   void RenderTile(const Tile & tile);
 
   void RenderTriangleInTile(const TransformedTriangle& tri, const Tile & tile);
+  void RenderTriangleInTile8x(const TransformedTriangle& tri, const Tile& tile);
 
-  // Test SIMD de 8 pixels
-  __m256i TestPixels8x(float startX, float y, const TransformedTriangle& tri);
+  bool TestPixels1x(float x, float y, const TransformedTriangle& tri);
+  __m256i TestPixels8x(float startX, float y, const TransformedTriangle& tri); // Test SIMD de 8 pixels
 
+  float InterpolateDepth1x_InverseZ(float x, float y, const TransformedTriangle& tri);
   void InterpolateDepth8x(float startX, float y, const TransformedTriangle& tri, const glm::vec3& depths, const glm::vec3& wValues, float* output);
   void InterpolateDepth8x_InverseZ(float startX, float y, const TransformedTriangle& tri, float* output);
 
@@ -54,11 +56,7 @@ protected:
   void RenderTriangles(const glm::mat4& mvp);
   void RenderTrianglesInBatch(const glm::mat4& mvp);
 
-  const uint32_t* GetColorBuffer() const { return _ColorBuffer.data(); }
-  int GetWidth() const { return _ScreenWidth; }
-  int GetHeight() const { return _ScreenHeight; }
-
-  void SetBackfaceCullingEnabled(bool enabled) { _BackfaceCullingEnabled = enabled; }
+  virtual void SetTriangles(const std::vector<Triangle>& triangles);
 
 private:
   int _TileCountX, _TileCountY;
@@ -76,8 +74,6 @@ private:
 
   // Scene
   std::vector<TransformedTriangle> _Transformed;
-
-  bool _BackfaceCullingEnabled = true;
 
   static constexpr int TILE_SIZE = 32;
 };

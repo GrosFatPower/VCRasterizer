@@ -1,43 +1,40 @@
 #pragma once
 
-#include <vector>
+#include <deque>  // Changed from vector
 #include <chrono>
 
 // Version avec gestion d'événements plus réaliste
 class FPSCounter {
 private:
-  std::chrono::high_resolution_clock::time_point lastUpdate;
-  std::vector<double> frameTimes;
-  double currentFPS = 0.0;
-  static constexpr int HISTORY_SIZE = 60;
+    std::chrono::high_resolution_clock::time_point lastUpdate;
+    std::deque<std::chrono::high_resolution_clock::time_point> frameTimestamps;  // Changed to deque
+    double currentFPS = 0.0;
+    static constexpr double WINDOW_SIZE = 1.0; // 1 second window
 
 public:
-  FPSCounter() : lastUpdate(std::chrono::high_resolution_clock::now()) {
-    frameTimes.reserve(HISTORY_SIZE);
-  }
+    FPSCounter() : lastUpdate(std::chrono::high_resolution_clock::now()) {}
 
-  void update() {
-    auto now = std::chrono::high_resolution_clock::now();
-    auto deltaTime = std::chrono::duration<double, std::milli>(now - lastUpdate);
-    lastUpdate = now;
+    void update() {
+        auto now = std::chrono::high_resolution_clock::now();
+        frameTimestamps.push_back(now);
 
-    if (frameTimes.size() >= HISTORY_SIZE) {
-      frameTimes.erase(frameTimes.begin());
+        // Remove frames older than WINDOW_SIZE seconds
+        auto oneSecondAgo = now - std::chrono::duration<double>(WINDOW_SIZE);
+        while (!frameTimestamps.empty() && frameTimestamps.front() < oneSecondAgo) {
+            frameTimestamps.pop_front();
+        }
+
+        // Calculate FPS based on number of frames in the last second
+        currentFPS = static_cast<double>(frameTimestamps.size()) / WINDOW_SIZE;
+        lastUpdate = now;
     }
-    frameTimes.push_back(deltaTime.count());
 
-    if (!frameTimes.empty()) {
-      double avgTime = 0.0;
-      for (double time : frameTimes) {
-        avgTime += time;
-      }
-      avgTime /= frameTimes.size();
-      currentFPS = 1000.0 / avgTime;
+    double getFPS() const { return currentFPS; }
+    
+    double getLastFrameTime() const {
+        if (frameTimestamps.size() < 2) return 0.0;
+        auto duration = std::chrono::duration<double, std::milli>(
+            frameTimestamps.back() - *(frameTimestamps.end() - 2));
+        return duration.count();
     }
-  }
-
-  double getFPS() const { return currentFPS; }
-  double getLastFrameTime() const {
-    return frameTimes.empty() ? 0.0 : frameTimes.back();
-  }
 };

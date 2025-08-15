@@ -166,7 +166,7 @@ int main()
         headerTextStr = "Single threaded Rasterizer - Press F2 for SIMD or F3 for Optimized SIMD";
       else if (S_TestNum == 1 )
         headerTextStr = "Multi-Threaded SIMD Rasterizer - Press F1 for Software or F3 for Optimized SIMD";
-      else if (S_TestNum == 3)
+      else if (S_TestNum == 2)
       {
         headerTextStr = "Optimized Multi-Threaded SIMD Rasterizer - Press F1 for Software or Press F2 for SIMD";
         //rasterizer -> SetRenderMode(RenderMode::AVX2);

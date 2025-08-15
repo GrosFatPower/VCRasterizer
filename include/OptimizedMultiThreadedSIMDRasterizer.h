@@ -1,5 +1,12 @@
 #pragma once
 
+// Note: The padding warnings (C4324) for alignment are actually expected and can be safely ignored
+// as they indicate the compiler is properly aligning the structures for SIMD operations.
+#ifdef _MSC_VER
+#pragma warning(disable: 4324) // Disable structure padding warning
+#endif
+
+
 #include "DatatTypes.h"
 #include "Renderer.h"
 #include <vector>
@@ -18,7 +25,8 @@
 class OptimizedMultiThreadedSIMDRasterizer : public Renderer
 {
 public:
-  enum class RenderMode {
+  enum class RenderMode
+  {
     SCALAR,
     SSE,
     AVX2,
@@ -26,7 +34,7 @@ public:
   };
 
   OptimizedMultiThreadedSIMDRasterizer(int w, int h, int numThreads = 0);
-  ~OptimizedMultiThreadedSIMDRasterizer();
+  virtual ~OptimizedMultiThreadedSIMDRasterizer();
 
   // Interface principale
   virtual int InitScene(const int nbTris = 100) override;
@@ -53,12 +61,14 @@ protected:
   static constexpr int MIN_TRIANGLES_PER_TILE = 4;
 
   // Structures de données cache-friendly
-  struct alignas(64) ThreadLocalData {
+  struct alignas(64) ThreadLocalData
+  {
     alignas(32) float depthBuffer[TILE_SIZE * TILE_SIZE];
     alignas(32) uint32_t colorBuffer[TILE_SIZE * TILE_SIZE];
     std::vector<const TransformedTriangle*> localTriangles;
 
-    ThreadLocalData() {
+    ThreadLocalData()
+    {
       // Initialize buffers to default values
       std::fill_n(depthBuffer, TILE_SIZE * TILE_SIZE, std::numeric_limits<float>::infinity());
       std::fill_n(colorBuffer, TILE_SIZE * TILE_SIZE, 0);
@@ -66,7 +76,8 @@ protected:
     }
   };
 
-  struct alignas(64) TileData {
+  struct alignas(64) TileData
+  {
     Tile tile;
     std::vector<const TransformedTriangle*> triangles;
     std::atomic<int> triangleCount;
@@ -250,8 +261,19 @@ private:
 // Utilitaires SIMD pour tests et validation
 namespace SIMDUtils {
   // Test de support des instructions SIMD
-  bool HasAVX2Support();
-  bool HasAVX512Support();
+  inline bool HasAVX2Support()
+  {
+    int cpuInfo[4];
+    __cpuid(cpuInfo, 1);
+    return (cpuInfo[2] & (1 << 5)) != 0; // AVX2 support
+  }
+
+  inline bool HasAVX512Support()
+  {
+    int cpuInfo[4];
+    __cpuid(cpuInfo, 7);
+    return (cpuInfo[1] & (1 << 16)) != 0; // AVX512F support
+  }
 
   // Benchmark des différentes largeurs SIMD
   void BenchmarkSIMDWidths();
@@ -261,10 +283,3 @@ namespace SIMDUtils {
     float(*scalarFunc)(float),
     void(*simdFunc)(const float*, float*, size_t));
 }
-
-
-// Note: The padding warnings (C4324) for alignment are actually expected and can be safely ignored
-// as they indicate the compiler is properly aligning the structures for SIMD operations.
-#ifdef _MSC_VER
-#pragma warning(disable: 4324) // Disable structure padding warning
-#endif

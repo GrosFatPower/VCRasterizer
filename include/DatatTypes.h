@@ -1,5 +1,12 @@
 #pragma once
 
+// Note: The padding warnings (C4324) for alignment are actually expected and can be safely ignored
+// as they indicate the compiler is properly aligning the structures for SIMD operations.
+#ifdef _MSC_VER
+#pragma warning(disable: 4324) // Disable structure padding warning
+#endif
+
+
 #include <vector>
 #include <random>
 #include <glm/glm.hpp>

@@ -18,8 +18,10 @@ OptimizedMultiThreadedSIMDRasterizer::OptimizedMultiThreadedSIMDRasterizer(int w
   _OptimizedTiles.resize(_TileCountX * _TileCountY);
 
   // Initialisation des tuiles
-  for (int ty = 0; ty < _TileCountY; ++ty) {
-    for (int tx = 0; tx < _TileCountX; ++tx) {
+  for (int ty = 0; ty < _TileCountY; ++ty)
+  {
+    for (int tx = 0; tx < _TileCountX; ++tx)
+    {
       int tileIndex = ty * _TileCountX + tx;
       TileData& tileData = _OptimizedTiles[tileIndex];
 
@@ -36,7 +38,8 @@ OptimizedMultiThreadedSIMDRasterizer::OptimizedMultiThreadedSIMDRasterizer(int w
 
   // Initialisation des données thread-local
   _ThreadLocalData.resize(_NumThreads);
-  for (int i = 0; i < _NumThreads; ++i) {
+  for (int i = 0; i < _NumThreads; ++i)
+  {
     _ThreadLocalData[i] = std::make_unique<ThreadLocalData>();
     _ThreadLocalData[i]->localTriangles.reserve(1000);
   }
@@ -46,7 +49,8 @@ OptimizedMultiThreadedSIMDRasterizer::OptimizedMultiThreadedSIMDRasterizer(int w
 
   // Démarrage des threads worker
   //_ThreadWorkIndices.resize(_NumThreads);
-  for (int i = 0; i < _NumThreads; ++i) {
+  for (int i = 0; i < _NumThreads; ++i)
+  {
     //_ThreadWorkIndices[i].store(0);
     _ThreadWorkIndices.emplace_back(0);
     _WorkerThreads.emplace_back(&OptimizedMultiThreadedSIMDRasterizer::WorkerThreadFunctionOptimized, this, i);
@@ -62,8 +66,10 @@ OptimizedMultiThreadedSIMDRasterizer::~OptimizedMultiThreadedSIMDRasterizer()
   _ThreadsShouldRun.store(false);
   _RenderCV.notify_all();
 
-  for (auto& thread : _WorkerThreads) {
-    if (thread.joinable()) {
+  for (auto& thread : _WorkerThreads)
+  {
+    if (thread.joinable())
+    {
       thread.join();
     }
   }
@@ -72,7 +78,8 @@ OptimizedMultiThreadedSIMDRasterizer::~OptimizedMultiThreadedSIMDRasterizer()
 void OptimizedMultiThreadedSIMDRasterizer::InitializeLookupTables()
 {
   // Initialisation de la lookup table pour les edge functions
-  for (int i = 0; i < 256; ++i) {
+  for (int i = 0; i < 256; ++i)
+  {
     _EdgeLUT[i] = (float)i / 255.0f;
   }
 }
@@ -92,7 +99,7 @@ void OptimizedMultiThreadedSIMDRasterizer::SetTriangles(const std::vector<Triang
 
 void OptimizedMultiThreadedSIMDRasterizer::RenderRotatingScene(float time)
 {
-  Clear(0x87CEEBFF);
+  Clear(0xADD8E6FF);
 
   // Matrices de transformation
   glm::mat4 model = glm::rotate(glm::mat4(1.0f), time, glm::vec3(0, 1, 0));

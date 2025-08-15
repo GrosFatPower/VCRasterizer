@@ -1,14 +1,19 @@
 #pragma once
 
-// Note: The padding warnings (C4324) for alignment are actually expected and can be safely ignored
-// as they indicate the compiler is properly aligning the structures for SIMD operations.
+// Configuration des warnings pour différents compilateurs
 #ifdef _MSC_VER
 #pragma warning(disable: 4324) // Disable structure padding warning
+#elif defined(__clang__) || defined(__GNUC__)
+// Pour Clang/GCC, les warnings de padding sont moins fréquents
+#pragma GCC diagnostic ignored "-Wpadded"
 #endif
-
 
 #include <vector>
 #include <random>
+#include <limits>
+#define _USE_MATH_DEFINES
+#include <Math.h>
+#include <cmath>
 #include <glm/glm.hpp>
 
 #define SIMD_ALIGN alignas(32)
@@ -58,7 +63,7 @@ inline int LoadTriangles(std::vector<Triangle> & oTriangles, const int nbTris)
   std::uniform_real_distribution<float> posDist(-1.0f, 1.0f);      // For centroid x/y
   std::uniform_real_distribution<float> zDist(-1.0f, 1.0f);         // For centroid z (depth)
   std::uniform_real_distribution<float> sizeDist(0.05f, 0.25f);    // Triangle size
-  std::uniform_real_distribution<float> angleDist(0.0f, 2.0f * 3.14159265f); // Orientation
+  std::uniform_real_distribution<float> angleDist(0.0f, 2.0f * static_cast<float>(M_PI)); // Orientation
 
   for (int i = 0; i < nbTris; ++i)
   {
@@ -74,7 +79,7 @@ inline int LoadTriangles(std::vector<Triangle> & oTriangles, const int nbTris)
     glm::vec3 vertices[3];
     for (int v = 0; v < 3; ++v)
     {
-      float angle = baseAngle + v * (2.0f * 3.14159265f / 3.0f);
+      float angle = baseAngle + v * (2.0f * static_cast<float>(M_PI) / 3.0f);
       float r = size * (0.8f + 0.4f * posDist(gen)); // Slightly irregular triangle
       vertices[v] = glm::vec3(
         cx + r * std::cos(angle),

@@ -1,9 +1,11 @@
 #pragma once
 
-// Note: The padding warnings (C4324) for alignment are actually expected and can be safely ignored
-// as they indicate the compiler is properly aligning the structures for SIMD operations.
+// Configuration des warnings pour différents compilateurs
 #ifdef _MSC_VER
 #pragma warning(disable: 4324) // Disable structure padding warning
+#elif defined(__clang__) || defined(__GNUC__)
+// Pour Clang/GCC, les warnings de padding sont moins fréquents
+#pragma GCC diagnostic ignored "-Wpadded"
 #endif
 
 

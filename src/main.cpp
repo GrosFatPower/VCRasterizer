@@ -12,6 +12,7 @@
 #include "FPSCounter.h"
 #include "SoftwareRasterizer.h"
 #include "MultiThreadedSIMDRasterizer.h"
+#include "OptimizedMultiThreadedSIMDRasterizer.h"
 
 const int WIDTH = 1920;
 const int HEIGHT = 1080;
@@ -31,6 +32,11 @@ std::unique_ptr<Renderer> ReloadRasterizer(int testNum, int width, int height, i
   {
     std::cout << "Test Multi-Threaded SIMD Rasterizer" << std::endl;
     return std::make_unique<MultiThreadedSIMDRasterizer>(width, height, threadCount);
+  }
+  else if (testNum == 2)
+  {
+    std::cout << "Test Optimized Multi-Threaded SIMD Rasterizer" << std::endl;
+    return std::make_unique<OptimizedMultiThreadedSIMDRasterizer>(width, height, threadCount);
   }
   return nullptr;
 }
@@ -101,6 +107,11 @@ int main()
           S_TestNum = 1;
           reloadRenderer = true;
         }
+        else if (keyEvent && keyEvent->code == sf::Keyboard::Key::F3)
+        {
+          S_TestNum = 2;
+          reloadRenderer = true;
+        }
         else if (keyEvent && keyEvent->code == sf::Keyboard::Key::PageUp)
         {
           S_NbTriangles *= 2;
@@ -152,9 +163,16 @@ int main()
       }
 
       if ( S_TestNum == 0 )
-        headerTextStr = "Single threaded Rasterizer - Press F2 for SIMD";
+        headerTextStr = "Single threaded Rasterizer - Press F2 for SIMD or F3 for Optimized SIMD";
       else if (S_TestNum == 1 )
-        headerTextStr = "Multi-Threaded SIMD Rasterizer - Press F1 for Software";
+        headerTextStr = "Multi-Threaded SIMD Rasterizer - Press F1 for Software or F3 for Optimized SIMD";
+      else if (S_TestNum == 3)
+      {
+        headerTextStr = "Optimized Multi-Threaded SIMD Rasterizer - Press F1 for Software or Press F2 for SIMD";
+        //rasterizer -> SetRenderMode(RenderMode::AVX2);
+        rasterizer -> SetEnableSIMD(true);
+        rasterizer -> SetBackfaceCullingEnabled(true);
+      }
       headerText = sf::Text(font, headerTextStr, 16);
       headerText.setPosition({ 5., 5. });
 

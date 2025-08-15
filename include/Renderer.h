@@ -27,6 +27,7 @@ public:
 
   // Accès au buffer pour affichage
   const uint32_t* GetColorBuffer() const { return _ColorBuffer.data(); }
+  const float* GetDepthBuffer() const { return _DepthBuffer.data(); }
   int GetWidth() const { return _ScreenWidth; }
   int GetHeight() const { return _ScreenHeight; }
 

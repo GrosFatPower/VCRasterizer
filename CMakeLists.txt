@@ -1,6 +1,17 @@
 cmake_minimum_required(VERSION 3.20)
 
-# Configuration vcpkg
+# Détection de l'architecture avant la configuration vcpkg
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64|ARM64")
+    set(VCPKG_TARGET_TRIPLET "arm64-osx" CACHE STRING "")
+    set(ARCH_ARM64 TRUE)
+    message(STATUS "Detected ARM64 architecture, using arm64-osx triplet")
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+    set(VCPKG_TARGET_TRIPLET "x64-osx" CACHE STRING "")
+    set(ARCH_X64 TRUE)
+    message(STATUS "Detected x64 architecture, using x64-osx triplet")
+endif()
+
+# Configuration vcpkg avec le bon triplet
 set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/vcpkg/scripts/buildsystems/vcpkg.cmake" CACHE STRING "Vcpkg toolchain file")
 
 project(VCRasterizer VERSION 1.0.0)
@@ -8,15 +19,6 @@ project(VCRasterizer VERSION 1.0.0)
 # Configuration C++
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-# Détection de l'architecture
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64|ARM64")
-    set(ARCH_ARM64 TRUE)
-    message(STATUS "Detected ARM64 architecture")
-elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
-    set(ARCH_X64 TRUE)
-    message(STATUS "Detected x64 architecture")
-endif()
 
 # Configuration pour différents compilateurs
 if(MSVC)
@@ -63,11 +65,46 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL 
     endif()
 endif()
 
-# Trouver SFML
-find_package(SFML 3.0.0 COMPONENTS Graphics Window System REQUIRED)
+# Trouver SFML - essayer différentes versions et configurations
+find_package(SFML 3.0.0 COMPONENTS Graphics Window System)
+if(NOT SFML_FOUND)
+    message(STATUS "SFML 3.0 not found via vcpkg, trying Homebrew...")
+    # Fallback pour SFML via Homebrew
+    if(APPLE)
+        set(CMAKE_PREFIX_PATH "/opt/homebrew;/usr/local" ${CMAKE_PREFIX_PATH})
+        find_package(SFML 2.6.0 COMPONENTS graphics window system)
+        if(SFML_FOUND)
+            # Créer des alias pour la compatibilité
+            if(NOT TARGET SFML::Graphics)
+                add_library(SFML::Graphics ALIAS sfml-graphics)
+                add_library(SFML::Window ALIAS sfml-window) 
+                add_library(SFML::System ALIAS sfml-system)
+            endif()
+        endif()
+    endif()
+endif()
+
+if(NOT SFML_FOUND)
+    message(FATAL_ERROR "SFML not found. Please install via vcpkg or Homebrew")
+endif()
 
 # GLM
-find_package(glm CONFIG REQUIRED)
+find_package(glm CONFIG)
+if(NOT glm_FOUND)
+    message(STATUS "GLM not found via vcpkg, trying system installation...")
+    find_package(PkgConfig)
+    if(PKG_CONFIG_FOUND)
+        pkg_check_modules(GLM glm)
+        if(GLM_FOUND)
+            add_library(glm::glm INTERFACE IMPORTED)
+            target_include_directories(glm::glm INTERFACE ${GLM_INCLUDE_DIRS})
+        endif()
+    endif()
+endif()
+
+if(NOT TARGET glm::glm)
+    message(FATAL_ERROR "GLM not found. Please install via vcpkg or package manager")
+endif()
 
 # Collecter tous les fichiers source
 file(GLOB_RECURSE SOURCES 
@@ -136,8 +173,10 @@ message(STATUS "CXX Compiler: ${CMAKE_CXX_COMPILER_ID}")
 message(STATUS "CXX Flags: ${CMAKE_CXX_FLAGS}")
 if(ARCH_ARM64)
     message(STATUS "SIMD Support: ARM NEON")
+    message(STATUS "vcpkg Triplet: arm64-osx")
 elseif(ARCH_X64)
     message(STATUS "SIMD Support: AVX2")
+    message(STATUS "vcpkg Triplet: x64-osx")
 else()
     message(STATUS "SIMD Support: Scalar fallback")
 endif()

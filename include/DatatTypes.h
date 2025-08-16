@@ -55,7 +55,7 @@ struct Tile {
   std::vector<const TransformedTriangle*> triangles;
 };
 
-inline int LoadTriangles(std::vector<Triangle> & oTriangles, const int nbTris)
+inline int LoadTriangles(std::vector<Triangle>& oTriangles, const int nbTris)
 {
   oTriangles.clear();
 

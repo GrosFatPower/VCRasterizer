@@ -38,7 +38,7 @@ public:
   bool GetEnableSIMD() const { return _EnableSIMD; }
   void SetBackfaceCullingEnabled(bool enabled) { _EnableBackfaceCulling = enabled; }
   void SetEnableSIMD(bool enabled) { _EnableSIMD = enabled; }
-  
+
 protected:
   int _ScreenWidth, _ScreenHeight;
 

@@ -56,15 +56,35 @@ int main()
   }
 
   sf::Font font;
-  if (!font.openFromFile("../assets/arial.ttf"))
-  {
-    std::cout << "Unable to load arial.ttf" << std::endl;
-    return -1;
+  bool fontLoaded = false;
+
+  // Tentative de chargement de différentes polices selon la plateforme
+  std::vector<std::string> fontPaths = {
+      "../assets/arial.ttf",                           // Chemin relatif
+      "assets/arial.ttf",                             // Chemin depuis le build
+      "/System/Library/Fonts/Arial.ttf",              // macOS système
+      "/System/Library/Fonts/Helvetica.ttc",          // macOS alternative
+      "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", // Linux
+      "C:/Windows/Fonts/arial.ttf"                    // Windows
+  };
+
+  for (const auto& path : fontPaths) {
+    if (font.openFromFile(path)) {
+      std::cout << "Font loaded from: " << path << std::endl;
+      fontLoaded = true;
+      break;
+    }
+  }
+
+  if (!fontLoaded) {
+    std::cout << "Warning: Unable to load any font. Using default system font." << std::endl;
+    // SFML utilisera la police par défaut du système
+    // On peut continuer sans font ou créer une police par défaut
   }
 
   std::string headerTextStr = "Triangle rasterizer";
   sf::Text headerText(font, headerTextStr, 16);
-  headerText.setPosition({5., 5.});
+  headerText.setPosition({ 5., 5. });
 
   std::string nbTrisTextStr = "Nb Triangles = " + std::to_string(S_NbTriangles) + " (PageUp : x2, PageDown : /2)";
   sf::Text nbTrisText(font, nbTrisTextStr, 16);
@@ -96,7 +116,7 @@ int main()
 
       if (event->is<sf::Event::KeyPressed>())
       {
-        auto keyEvent = event -> getIf<sf::Event::KeyPressed>();
+        auto keyEvent = event->getIf<sf::Event::KeyPressed>();
         if (keyEvent && keyEvent->code == sf::Keyboard::Key::F1)
         {
           S_TestNum = 0;
@@ -126,8 +146,8 @@ int main()
         }
         else if (keyEvent && keyEvent->code == sf::Keyboard::Key::S && rasterizer)
         {
-          rasterizer -> SetEnableSIMD(!rasterizer->GetEnableSIMD());
-          if ( rasterizer -> GetEnableSIMD() )
+          rasterizer->SetEnableSIMD(!rasterizer->GetEnableSIMD());
+          if (rasterizer->GetEnableSIMD())
             std::cout << "SIMD : Enabled" << std::endl;
           else
             std::cout << "SIMD : Disabled" << std::endl;
@@ -135,7 +155,7 @@ int main()
         else if (keyEvent && keyEvent->code == sf::Keyboard::Key::C && rasterizer)
         {
           rasterizer->SetBackfaceCullingEnabled(!rasterizer->GetBackfaceCullingEnabled());
-          if (rasterizer -> GetBackfaceCullingEnabled())
+          if (rasterizer->GetBackfaceCullingEnabled())
             std::cout << "BackfaceCulling : Enabled" << std::endl;
           else
             std::cout << "BackfaceCulling : Disabled" << std::endl;
@@ -151,7 +171,7 @@ int main()
       }
     }
 
-    if ( reloadRenderer )
+    if (reloadRenderer)
     {
       const std::vector<Triangle> triangles = rasterizer ? rasterizer->GetTriangles() : std::vector<Triangle>();
 
@@ -162,48 +182,48 @@ int main()
         return -1;
       }
 
-      if ( S_TestNum == 0 )
+      if (S_TestNum == 0)
         headerTextStr = "Single threaded Rasterizer - Press F2 for SIMD or F3 for Optimized SIMD";
-      else if (S_TestNum == 1 )
+      else if (S_TestNum == 1)
         headerTextStr = "Multi-Threaded SIMD Rasterizer - Press F1 for Software or F3 for Optimized SIMD";
       else if (S_TestNum == 2)
       {
         headerTextStr = "Optimized Multi-Threaded SIMD Rasterizer - Press F1 for Software or Press F2 for SIMD";
         //rasterizer -> SetRenderMode(RenderMode::AVX2);
-        rasterizer -> SetEnableSIMD(true);
-        rasterizer -> SetBackfaceCullingEnabled(true);
+        rasterizer->SetEnableSIMD(true);
+        rasterizer->SetBackfaceCullingEnabled(true);
       }
       headerText = sf::Text(font, headerTextStr, 16);
       headerText.setPosition({ 5., 5. });
 
       reloadRenderer = false;
-      if ( !reloadScene && ( triangles.size() > 0 ) )
-        rasterizer -> SetTriangles(triangles);
+      if (!reloadScene && (triangles.size() > 0))
+        rasterizer->SetTriangles(triangles);
       else
         reloadScene = true;
     }
 
-    if ( reloadScene )
+    if (reloadScene)
     {
       nbTrisTextStr = "Nb Triangles = " + std::to_string(S_NbTriangles) + " (PageUp : x2, PageDown : /2)";
       nbTrisText = sf::Text(font, nbTrisTextStr, 16);
       nbTrisText.setPosition({ 5., 25. });
 
-      rasterizer -> InitScene(S_NbTriangles);
+      rasterizer->InitScene(S_NbTriangles);
       reloadScene = false;
     }
 
-    rasterizer -> RenderRotatingScene(time);
+    rasterizer->RenderRotatingScene(time);
     fpsCounter.update();
 
-    const uint32_t* pixels = rasterizer -> GetColorBuffer();
+    const uint32_t* pixels = rasterizer->GetColorBuffer();
     texture.update(reinterpret_cast<const std::uint8_t*>(pixels));
 
     window.clear();
     window.draw(sprite);
     window.draw(headerText);
     window.draw(nbTrisText);
-    if ( S_TestNum == 1 )
+    if (S_TestNum == 1)
       window.draw(optionsText);
     window.display();
 
@@ -211,7 +231,7 @@ int main()
 
     sf::Time elapsed = clock.restart();
     float deltaTime = elapsed.asSeconds();
-    if ( !pause)
+    if (!pause)
       time += deltaTime;
   }
 

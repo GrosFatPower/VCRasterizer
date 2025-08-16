@@ -85,9 +85,9 @@ protected:
     std::atomic<int> triangleCount;
     std::atomic<bool> needsProcessing;
 
-    TileData() 
+    TileData()
       : triangleCount(0)
-      , needsProcessing(false) 
+      , needsProcessing(false)
     {
       triangles.reserve(500);
     }
@@ -102,7 +102,8 @@ protected:
       , triangles(std::move(other.triangles))
       , triangleCount(other.triangleCount.load())
       , needsProcessing(other.needsProcessing.load())
-    {}
+    {
+    }
 
     TileData& operator=(TileData&& other) noexcept {
       if (this != &other) {

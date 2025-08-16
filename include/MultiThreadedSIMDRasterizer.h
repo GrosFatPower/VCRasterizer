@@ -1,13 +1,5 @@
 #pragma once
 
-// Configuration des warnings pour différents compilateurs
-#ifdef _MSC_VER
-#pragma warning(disable: 4324) // Disable structure padding warning
-#elif defined(__clang__) || defined(__GNUC__)
-// Pour Clang/GCC, les warnings de padding sont moins fréquents
-#pragma GCC diagnostic ignored "-Wpadded"
-#endif
-
 #include "DatatTypes.h"
 #include "Renderer.h"
 #include <vector>
@@ -15,9 +7,25 @@
 #include <mutex>
 #include <atomic>
 #include <chrono>
-#include <immintrin.h>  // AVX/SSE
+
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+
+// Detection de la plateforme SIMD
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+#include <arm_neon.h>
+#define SIMD_ARM_NEON
+#elif defined(__AVX2__)
+#include <immintrin.h>
+#ifndef SIMD_AVX2
+#define SIMD_AVX2
+#endif
+#elif defined(__SSE2__)
+#include <emmintrin.h>
+#define SIMD_SSE2
+#else
+#define SIMD_SCALAR
+#endif
 
 class MultiThreadedSIMDRasterizer : public Renderer
 {
@@ -44,17 +52,31 @@ protected:
   void WorkerThreadFunction();
 
   // Rendu d'une tuile avec SIMD
-  void RenderTile(const Tile & tile);
+  void RenderTile(const Tile& tile);
 
-  void RenderTriangleInTile(const TransformedTriangle& tri, const Tile & tile);
+  void RenderTriangleInTile(const TransformedTriangle& tri, const Tile& tile);
   void RenderTriangleInTile8x(const TransformedTriangle& tri, const Tile& tile);
+  void RenderTriangleInTile4x(const TransformedTriangle& tri, const Tile& tile); // Pour ARM NEON
 
   bool TestPixels1x(float x, float y, const TransformedTriangle& tri);
-  __m256i TestPixels8x(float startX, float y, const TransformedTriangle& tri); // Test SIMD de 8 pixels
+
+  // Test SIMD de pixels - adapté selon la plateforme
+#ifdef SIMD_ARM_NEON
+  uint32x4_t TestPixels4x_NEON(float startX, float y, const TransformedTriangle& tri);
+#endif
+#ifdef SIMD_AVX2
+  __m256i TestPixels8x_AVX2(float startX, float y, const TransformedTriangle& tri);
+#endif
 
   float InterpolateDepth1x_InverseZ(float x, float y, const TransformedTriangle& tri);
-  void InterpolateDepth8x(float startX, float y, const TransformedTriangle& tri, const glm::vec3& depths, const glm::vec3& wValues, float* output);
-  void InterpolateDepth8x_InverseZ(float startX, float y, const TransformedTriangle& tri, float* output);
+
+  // Interpolation de profondeur - adapté selon la plateforme
+#ifdef SIMD_ARM_NEON
+  void InterpolateDepth4x_InverseZ_NEON(float startX, float y, const TransformedTriangle& tri, float* output);
+#endif
+#ifdef SIMD_AVX2
+  void InterpolateDepth8x_InverseZ_AVX2(float startX, float y, const TransformedTriangle& tri, float* output);
+#endif
 
   void SetupTriangleData(TransformedTriangle& tri);
 

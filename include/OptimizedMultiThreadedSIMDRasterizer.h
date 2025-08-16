@@ -1,7 +1,7 @@
 #pragma once
 
 #include "SIMDUtils.h"
-#include "DatatTypes.h"
+#include "DataTypes.h"
 #include "Renderer.h"
 #include <vector>
 #include <deque>
@@ -41,7 +41,7 @@ public:
   virtual void SetBackfaceCullingEnabled(bool enable);
   virtual bool GetBackfaceCullingEnabled() const;
 
-  // M�thodes de configuration et debugging
+  // Methodes de configuration et debugging
   void SetRenderMode(RenderMode mode);
   void PrintPerformanceStats() const;
   void ResetPerformanceCounters();
@@ -54,7 +54,7 @@ protected:
   static constexpr int TILE_SIZE = 64;
   static constexpr int MIN_TRIANGLES_PER_TILE = 4;
 
-  // Structures de donn�es cache-friendly
+  // Structures de donnees cache-friendly
   struct alignas(64) ThreadLocalData
   {
     alignas(32) float depthBuffer[TILE_SIZE * TILE_SIZE];
@@ -109,13 +109,13 @@ protected:
   };
 
 protected:
-  // Pipeline de rendu optimis�
+  // Pipeline de rendu optimise
   void Clear(uint32_t color = 0x000000FF);
   void TransformTrianglesVectorized(const glm::mat4& mvp);
   void HierarchicalBinning();
   void RenderTrianglesMultiThreaded();
 
-  // Threading optimis� avec work stealing
+  // Threading optimise avec work stealing
   void WorkerThreadFunctionOptimized(int threadId);
   bool StealWork(int threadId, int& outTileIndex);
 
@@ -124,7 +124,7 @@ protected:
   void RenderTriangleInTile16x(const TransformedTriangle& tri, const Tile& tile, ThreadLocalData* localData);
   void RenderTriangleInTile8x(const TransformedTriangle& tri, const Tile& tile);
 
-  // Tests de pixels optimis�s
+  // Tests de pixels optimises
   __m256i TestPixels8xOptimized(float startX, float y, const TransformedTriangle& tri);
   bool TestPixels1x(float x, float y, const TransformedTriangle& tri);
   bool TestBlockVisibility(int blockX, int blockY, int blockW, int blockH, const TransformedTriangle& tri);
@@ -133,7 +133,7 @@ protected:
   void InterpolateDepth8x_InverseZ(float startX, float y, const TransformedTriangle& tri, float* output);
   float InterpolateDepth1x_InverseZ(float x, float y, const TransformedTriangle& tri);
 
-  // Mise � jour des buffers
+  // Mise e jour des buffers
   void UpdateZBuffer8x(int pixelIndex, const float* depths, const __m256i& mask, uint32_t color);
   void UpdateLocalBuffer8x(int localX, int localY, int tileWidth, const float* depths,
     const __m256i& mask, uint32_t color, ThreadLocalData* localData);
@@ -146,11 +146,11 @@ protected:
   void InitializeLookupTables();
 
 private:
-  // Donn�es de tiling
+  // Donnees de tiling
   int _TileCountX, _TileCountY;
   std::vector<TileData> _OptimizedTiles;
 
-  // Thread pool optimis�
+  // Thread pool optimise
   int _NumThreads;
   std::vector<std::thread> _WorkerThreads;
   std::vector<std::unique_ptr<ThreadLocalData>> _ThreadLocalData;
@@ -166,7 +166,7 @@ private:
   std::condition_variable _TilesDoneCV;
   std::mutex _TilesDoneMutex;
 
-  // Scene et triangles transform�s
+  // Scene et triangles transformes
   std::vector<Triangle> _Triangles;
   std::vector<TransformedTriangle> _Transformed;
 
@@ -209,13 +209,13 @@ public:
 
   static void PrintBenchmarkResults(const std::vector<BenchmarkResult>& results);
 
-  // Benchmark sp�cifique SIMD
+  // Benchmark specifique SIMD
   static void BenchmarkSIMDModes(OptimizedMultiThreadedSIMDRasterizer& rasterizer,
     const std::vector<Triangle>& triangles,
     int frames = 100);
 };
 
-// Profiler pour analyse d�taill�e des performances
+// Profiler pour analyse detaillee des performances
 class RasterizerProfiler {
 public:
   struct ProfileData {

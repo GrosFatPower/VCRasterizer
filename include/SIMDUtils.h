@@ -1,10 +1,10 @@
 #pragma once
 
-// Configuration des warnings pour diff�rents compilateurs
+// Configuration des warnings pour differents compilateurs
 #ifdef _MSC_VER
 #pragma warning(disable: 4324) // Disable structure padding warning
 #elif defined(__clang__) || defined(__GNUC__)
-// Pour Clang/GCC, les warnings de padding sont moins fr�quents
+// Pour Clang/GCC, les warnings de padding sont moins frequents
 #pragma GCC diagnostic ignored "-Wpadded"
 #endif
 
@@ -22,6 +22,10 @@
 #define SIMD_SSE2
 #else
 #define SIMD_SCALAR
+#endif
+
+#ifdef _MSC_VER
+#include <intrin.h> // Pour __cpuid
 #endif
 
 

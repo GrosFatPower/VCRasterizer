@@ -1,7 +1,7 @@
 #pragma once
 
 #include "SIMDUtils.h"
-#include "DatatTypes.h"
+#include "DataTypes.h"
 #include "Renderer.h"
 #include <vector>
 #include <thread>
@@ -47,7 +47,7 @@ protected:
 
   bool TestPixels1x(float x, float y, const TransformedTriangle& tri);
 
-  // Test SIMD de pixels - adapt� selon la plateforme
+  // Test SIMD de pixels - adapte selon la plateforme
 #ifdef SIMD_ARM_NEON
   uint32x4_t TestPixels4x_NEON(float startX, float y, const TransformedTriangle& tri);
 #endif
@@ -57,7 +57,7 @@ protected:
 
   float InterpolateDepth1x_InverseZ(float x, float y, const TransformedTriangle& tri);
 
-  // Interpolation de profondeur - adapt� selon la plateforme
+  // Interpolation de profondeur - adapte selon la plateforme
 #ifdef SIMD_ARM_NEON
   void InterpolateDepth4x_InverseZ_NEON(float startX, float y, const TransformedTriangle& tri, float* output);
 #endif

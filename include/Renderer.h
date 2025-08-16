@@ -1,6 +1,6 @@
 #pragma once
 
-#include "DatatTypes.h"
+#include "DataTypes.h"
 #include <vector>
 
 class Renderer

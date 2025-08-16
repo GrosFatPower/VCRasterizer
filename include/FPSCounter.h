@@ -3,7 +3,7 @@
 #include <deque>  // Changed from vector
 #include <chrono>
 
-// Version avec gestion d'�v�nements plus r�aliste
+// Version avec gestion d'evenements plus realiste
 class FPSCounter
  {
 public:

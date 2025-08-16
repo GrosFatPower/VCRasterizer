@@ -1,5 +1,6 @@
 #pragma once
 
+#include "SIMDUtils.h"
 #include <vector>
 #include <random>
 #include <limits>

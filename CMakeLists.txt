@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.20)
 
+project(VCRasterizer VERSION 1.0.0)
+
 # Détection de l'architecture avant la configuration vcpkg
+message(STATUS "CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR}")
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64|ARM64")
     set(VCPKG_TARGET_TRIPLET "arm64-osx" CACHE STRING "")
     set(ARCH_ARM64 TRUE)
@@ -13,8 +16,6 @@ endif()
 
 # Configuration vcpkg avec le bon triplet
 set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/vcpkg/scripts/buildsystems/vcpkg.cmake" CACHE STRING "Vcpkg toolchain file")
-
-project(VCRasterizer VERSION 1.0.0)
 
 # Configuration C++
 set(CMAKE_CXX_STANDARD 17)
@@ -61,7 +62,8 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL 
         # Support AVX2 sur x64
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mavx2 -mfma")
         add_compile_definitions(SIMD_AVX2)
-        message(STATUS "Enabling AVX2 support")
+        message(STATUS "Enabling AVX2 support")	
+
     endif()
 endif()
 

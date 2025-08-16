@@ -42,7 +42,8 @@ struct TransformedTriangle
   SIMD_ALIGN float invDepths[3];  // 1/Z0, 1/Z1, 1/Z2
 };
 
-struct Tile {
+struct Tile
+{
   int x, y;
   int width, height;
   std::vector<const TransformedTriangle*> triangles;

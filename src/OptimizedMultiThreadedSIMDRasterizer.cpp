@@ -180,6 +180,7 @@ void OptimizedMultiThreadedSIMDRasterizer::TransformTrianglesVectorized(const gl
           clipSpace.z * invW,  // Pour Z-buffer
           clipSpace.w          // Profondeur originale pour interpolation
         );
+        transformedTri.valid = true;
       }
       else {
         transformedTri.valid = false;
@@ -340,7 +341,7 @@ void OptimizedMultiThreadedSIMDRasterizer::RenderTileAVX2(const Tile& tile, Thre
   const TileData& tileData = _OptimizedTiles[tileIndex];
 
   // Clear du tile local
-  const __m256i clearColor = _mm256_set1_epi32(0x87CEEBFF);
+  const __m256i clearColor = _mm256_set1_epi32(0xADD8E6FF);
   const __m256 clearDepth = _mm256_set1_ps(std::numeric_limits<float>::max());
 
   const int tilePixels = tile.width * tile.height;

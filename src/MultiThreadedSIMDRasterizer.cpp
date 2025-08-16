@@ -545,9 +545,9 @@ void MultiThreadedSIMDRasterizer::SetupTriangleData(TransformedTriangle& tri)
   tri.edgeC[2] = v0.x * v1.y - v1.x * v0.y;
 
   // Inverses des profondeurs pour interpolation
-  tri.invDepths[0] = (v0.z != 0.0f) ? 1.0f / v0.z : 0.0f;
-  tri.invDepths[1] = (v1.z != 0.0f) ? 1.0f / v1.z : 0.0f;
-  tri.invDepths[2] = (v2.z != 0.0f) ? 1.0f / v2.z : 0.0f;
+  tri.invDepths[0] = (v0.w != 0.0f) ? 1.0f / v0.w : 0.0f;
+  tri.invDepths[1] = (v1.w != 0.0f) ? 1.0f / v1.w : 0.0f;
+  tri.invDepths[2] = (v2.w != 0.0f) ? 1.0f / v2.w : 0.0f;
 }
 
 glm::vec4 MultiThreadedSIMDRasterizer::TransformVertex(const glm::vec3& vertex, const glm::mat4& mvp)

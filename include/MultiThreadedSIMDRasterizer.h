@@ -1,5 +1,6 @@
 #pragma once
 
+#include "SIMDUtils.h"
 #include "DatatTypes.h"
 #include "Renderer.h"
 #include <vector>
@@ -11,21 +12,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
-// Detection de la plateforme SIMD
-#if defined(__ARM_NEON) || defined(__ARM_NEON__)
-#include <arm_neon.h>
-#define SIMD_ARM_NEON
-#elif defined(__AVX2__)
-#include <immintrin.h>
-#ifndef SIMD_AVX2
-#define SIMD_AVX2
-#endif
-#elif defined(__SSE2__)
-#include <emmintrin.h>
-#define SIMD_SSE2
-#else
-#define SIMD_SCALAR
-#endif
+
 
 class MultiThreadedSIMDRasterizer : public Renderer
 {
@@ -60,7 +47,7 @@ protected:
 
   bool TestPixels1x(float x, float y, const TransformedTriangle& tri);
 
-  // Test SIMD de pixels - adapté selon la plateforme
+  // Test SIMD de pixels - adaptï¿½ selon la plateforme
 #ifdef SIMD_ARM_NEON
   uint32x4_t TestPixels4x_NEON(float startX, float y, const TransformedTriangle& tri);
 #endif
@@ -70,7 +57,7 @@ protected:
 
   float InterpolateDepth1x_InverseZ(float x, float y, const TransformedTriangle& tri);
 
-  // Interpolation de profondeur - adapté selon la plateforme
+  // Interpolation de profondeur - adaptï¿½ selon la plateforme
 #ifdef SIMD_ARM_NEON
   void InterpolateDepth4x_InverseZ_NEON(float startX, float y, const TransformedTriangle& tri, float* output);
 #endif

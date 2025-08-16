@@ -1,14 +1,6 @@
 #pragma once
 
-// Configuration des warnings pour diff�rents compilateurs
-#ifdef _MSC_VER
-#pragma warning(disable: 4324) // Disable structure padding warning
-#elif defined(__clang__) || defined(__GNUC__)
-// Pour Clang/GCC, les warnings de padding sont moins fr�quents
-#pragma GCC diagnostic ignored "-Wpadded"
-#endif
-
-
+#include "SIMDUtils.h"
 #include "DatatTypes.h"
 #include "Renderer.h"
 #include <vector>
@@ -22,22 +14,6 @@
 #include <memory>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-
-// Detection de la plateforme SIMD
-#if defined(__ARM_NEON) || defined(__ARM_NEON__)
-#include <arm_neon.h>
-#define SIMD_ARM_NEON
-#elif defined(__AVX2__)
-#include <immintrin.h>
-#ifndef SIMD_AVX2
-#define SIMD_AVX2
-#endif
-#elif defined(__SSE2__)
-#include <emmintrin.h>
-#define SIMD_SSE2
-#else
-#define SIMD_SCALAR
-#endif
 
 #if defined(SIMD_AVX2)
 class OptimizedMultiThreadedSIMDRasterizer : public Renderer
@@ -276,32 +252,6 @@ private:
   std::unordered_map<std::string, ProfileData> _profiles;
   mutable std::mutex _profileMutex;
 };
-
-// Utilitaires SIMD pour tests et validation
-namespace SIMDUtils {
-  // Test de support des instructions SIMD
-  inline bool HasAVX2Support()
-  {
-    int cpuInfo[4];
-    __cpuid(cpuInfo, 1);
-    return (cpuInfo[2] & (1 << 5)) != 0; // AVX2 support
-  }
-
-  inline bool HasAVX512Support()
-  {
-    int cpuInfo[4];
-    __cpuid(cpuInfo, 7);
-    return (cpuInfo[1] & (1 << 16)) != 0; // AVX512F support
-  }
-
-  // Benchmark des diff�rentes largeurs SIMD
-  void BenchmarkSIMDWidths();
-
-  // Validation de coh�rence des calculs SIMD vs scalaire
-  bool ValidateSIMDAccuracy(const std::vector<float>& input,
-    float(*scalarFunc)(float),
-    void(*simdFunc)(const float*, float*, size_t));
-}
 
 #else
 

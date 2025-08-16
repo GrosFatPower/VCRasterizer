@@ -1,10 +1,10 @@
 #pragma once
 
-// Configuration des warnings pour différents compilateurs
+// Configuration des warnings pour diffï¿½rents compilateurs
 #ifdef _MSC_VER
 #pragma warning(disable: 4324) // Disable structure padding warning
 #elif defined(__clang__) || defined(__GNUC__)
-// Pour Clang/GCC, les warnings de padding sont moins fréquents
+// Pour Clang/GCC, les warnings de padding sont moins frï¿½quents
 #pragma GCC diagnostic ignored "-Wpadded"
 #endif
 
@@ -20,10 +20,26 @@
 #include <unordered_map>
 #include <condition_variable>
 #include <memory>
-#include <immintrin.h>  // AVX/SSE
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
+// Detection de la plateforme SIMD
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+#include <arm_neon.h>
+#define SIMD_ARM_NEON
+#elif defined(__AVX2__)
+#include <immintrin.h>
+#ifndef SIMD_AVX2
+#define SIMD_AVX2
+#endif
+#elif defined(__SSE2__)
+#include <emmintrin.h>
+#define SIMD_SSE2
+#else
+#define SIMD_SCALAR
+#endif
+
+#if defined(SIMD_AVX2)
 class OptimizedMultiThreadedSIMDRasterizer : public Renderer
 {
 public:
@@ -49,7 +65,7 @@ public:
   virtual void SetBackfaceCullingEnabled(bool enable);
   virtual bool GetBackfaceCullingEnabled() const;
 
-  // Méthodes de configuration et debugging
+  // Mï¿½thodes de configuration et debugging
   void SetRenderMode(RenderMode mode);
   void PrintPerformanceStats() const;
   void ResetPerformanceCounters();
@@ -62,7 +78,7 @@ protected:
   static constexpr int TILE_SIZE = 64;
   static constexpr int MIN_TRIANGLES_PER_TILE = 4;
 
-  // Structures de données cache-friendly
+  // Structures de donnï¿½es cache-friendly
   struct alignas(64) ThreadLocalData
   {
     alignas(32) float depthBuffer[TILE_SIZE * TILE_SIZE];
@@ -117,13 +133,13 @@ protected:
   };
 
 protected:
-  // Pipeline de rendu optimisé
+  // Pipeline de rendu optimisï¿½
   void Clear(uint32_t color = 0x000000FF);
   void TransformTrianglesVectorized(const glm::mat4& mvp);
   void HierarchicalBinning();
   void RenderTrianglesMultiThreaded();
 
-  // Threading optimisé avec work stealing
+  // Threading optimisï¿½ avec work stealing
   void WorkerThreadFunctionOptimized(int threadId);
   bool StealWork(int threadId, int& outTileIndex);
 
@@ -132,7 +148,7 @@ protected:
   void RenderTriangleInTile16x(const TransformedTriangle& tri, const Tile& tile, ThreadLocalData* localData);
   void RenderTriangleInTile8x(const TransformedTriangle& tri, const Tile& tile);
 
-  // Tests de pixels optimisés
+  // Tests de pixels optimisï¿½s
   __m256i TestPixels8xOptimized(float startX, float y, const TransformedTriangle& tri);
   bool TestPixels1x(float x, float y, const TransformedTriangle& tri);
   bool TestBlockVisibility(int blockX, int blockY, int blockW, int blockH, const TransformedTriangle& tri);
@@ -141,7 +157,7 @@ protected:
   void InterpolateDepth8x_InverseZ(float startX, float y, const TransformedTriangle& tri, float* output);
   float InterpolateDepth1x_InverseZ(float x, float y, const TransformedTriangle& tri);
 
-  // Mise à jour des buffers
+  // Mise ï¿½ jour des buffers
   void UpdateZBuffer8x(int pixelIndex, const float* depths, const __m256i& mask, uint32_t color);
   void UpdateLocalBuffer8x(int localX, int localY, int tileWidth, const float* depths,
     const __m256i& mask, uint32_t color, ThreadLocalData* localData);
@@ -154,11 +170,11 @@ protected:
   void InitializeLookupTables();
 
 private:
-  // Données de tiling
+  // Donnï¿½es de tiling
   int _TileCountX, _TileCountY;
   std::vector<TileData> _OptimizedTiles;
 
-  // Thread pool optimisé
+  // Thread pool optimisï¿½
   int _NumThreads;
   std::vector<std::thread> _WorkerThreads;
   std::vector<std::unique_ptr<ThreadLocalData>> _ThreadLocalData;
@@ -174,7 +190,7 @@ private:
   std::condition_variable _TilesDoneCV;
   std::mutex _TilesDoneMutex;
 
-  // Scene et triangles transformés
+  // Scene et triangles transformï¿½s
   std::vector<Triangle> _Triangles;
   std::vector<TransformedTriangle> _Transformed;
 
@@ -217,13 +233,13 @@ public:
 
   static void PrintBenchmarkResults(const std::vector<BenchmarkResult>& results);
 
-  // Benchmark spécifique SIMD
+  // Benchmark spï¿½cifique SIMD
   static void BenchmarkSIMDModes(OptimizedMultiThreadedSIMDRasterizer& rasterizer,
     const std::vector<Triangle>& triangles,
     int frames = 100);
 };
 
-// Profiler pour analyse détaillée des performances
+// Profiler pour analyse dï¿½taillï¿½e des performances
 class RasterizerProfiler {
 public:
   struct ProfileData {
@@ -278,11 +294,39 @@ namespace SIMDUtils {
     return (cpuInfo[1] & (1 << 16)) != 0; // AVX512F support
   }
 
-  // Benchmark des différentes largeurs SIMD
+  // Benchmark des diffï¿½rentes largeurs SIMD
   void BenchmarkSIMDWidths();
 
-  // Validation de cohérence des calculs SIMD vs scalaire
+  // Validation de cohï¿½rence des calculs SIMD vs scalaire
   bool ValidateSIMDAccuracy(const std::vector<float>& input,
     float(*scalarFunc)(float),
     void(*simdFunc)(const float*, float*, size_t));
 }
+
+#else
+
+class OptimizedMultiThreadedSIMDRasterizer : public Renderer
+{
+public:
+  OptimizedMultiThreadedSIMDRasterizer(int w, int h, int numThreads = 0)
+    : Renderer(w, h)
+  {}
+
+  virtual ~OptimizedMultiThreadedSIMDRasterizer() = default;
+  
+  virtual int InitScene(const int nbTris = 100) override
+  {
+    return Renderer::InitScene(nbTris);
+  }
+
+  virtual void RenderRotatingScene(float time) override
+  {
+  } 
+
+  virtual void SetTriangles(const std::vector<Triangle>& triangles) override
+  {
+    Renderer::SetTriangles(triangles);
+  } 
+};  
+
+#endif // SIMD_AVX2

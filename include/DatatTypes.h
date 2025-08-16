@@ -12,7 +12,7 @@
 #include <random>
 #include <limits>
 #define _USE_MATH_DEFINES
-#include <Math.h>
+#include <math.h>
 #include <cmath>
 #include <glm/glm.hpp>
 

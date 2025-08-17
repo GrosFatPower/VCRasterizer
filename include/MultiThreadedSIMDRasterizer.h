@@ -77,7 +77,7 @@ private:
   std::vector<std::thread> _WorkerThreads;
   std::atomic<int>         _NextTileIndexAtomic{ 0 };
   std::atomic<bool>        _RenderingActiveAtomic{ false };
-  std::atomic<bool>        _ThreadsShouldRunAtomic{ true };
+  std::atomic<bool>        _TerminateThreadWorkAtomic{ false };
   std::condition_variable  _RenderCV;
   std::mutex               _RenderMutex;
   std::condition_variable  _TilesDoneCV;

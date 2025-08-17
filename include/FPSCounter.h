@@ -16,7 +16,7 @@ public:
     auto now = std::chrono::high_resolution_clock::now();
     frameTimestamps.push_back(now);
 
-    if ( now - lastUpdate < std::chrono::duration<double>(WINDOW_SIZE) )
+    if ( now - lastUpdate < UPDATE_INTERVAL )
       return; // Pas assez de temps écoulé pour mettre à jour
 
     // Remove frames older than WINDOW_SIZE seconds
@@ -44,4 +44,5 @@ private:
   std::deque<std::chrono::high_resolution_clock::time_point> frameTimestamps;  // Changed to deque
   double currentFPS = 0.0;
   static constexpr double WINDOW_SIZE = 1.0; // 1 second window
+  static constexpr auto UPDATE_INTERVAL = std::chrono::duration<double>(.2); // Update every 200 ms
 };

@@ -47,7 +47,7 @@ MultiThreadedSIMDRasterizer::~MultiThreadedSIMDRasterizer()
 {
   {
     std::unique_lock<std::mutex> lock(_RenderMutex);
-    _ThreadsShouldRunAtomic.store(false); // Signal threads to exit
+    _TerminateThreadWorkAtomic.store(true); // Signal threads to exit
     _RenderingActiveAtomic.store(false);
   }
   _RenderCV.notify_all(); // Wake up all threads
@@ -212,10 +212,10 @@ void MultiThreadedSIMDRasterizer::WorkerThreadFunction()
   {
     std::unique_lock<std::mutex> lock(_RenderMutex);
     _RenderCV.wait(lock, [this] {
-      return _RenderingActiveAtomic.load() || !_ThreadsShouldRunAtomic.load(); // Check for exit condition
+      return _RenderingActiveAtomic.load() || _TerminateThreadWorkAtomic.load(); // Check for exit condition
       });
 
-    if (!_ThreadsShouldRunAtomic.load())
+    if (_TerminateThreadWorkAtomic.load())
       break;
 
     while (_RenderingActiveAtomic.load())
@@ -235,9 +235,9 @@ void MultiThreadedSIMDRasterizer::WorkerThreadFunction()
 //-----------------------------------------------------------------------------
 void MultiThreadedSIMDRasterizer::RenderTile(const Tile& tile)
 {
-  for (const auto* tri : tile.triangles)
+  if ( GetEnableSIMD() )
   {
-    if ( GetEnableSIMD() )
+    for (const auto* tri : tile.triangles)
     {
 #if defined(SIMD_ARM_NEON)
       RenderTriangleInTile4x(*tri, tile); // ARM NEON
@@ -247,10 +247,11 @@ void MultiThreadedSIMDRasterizer::RenderTile(const Tile& tile)
       RenderTriangleInTile1x(*tri, tile); // Fallback scalaire
 #endif
     }
-    else
-    {
+  }
+  else
+  {
+    for (const auto* tri : tile.triangles)
       RenderTriangleInTile1x(*tri, tile);
-    }
   }
 
   // Notify main thread if all tiles are done

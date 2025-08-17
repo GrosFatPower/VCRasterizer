@@ -201,7 +201,7 @@ int main()
         HUDTextStr = "Optimized Multi-Threaded SIMD Rasterizer - Press F1 for Software or Press F2 for SIMD";
 
       HUDTextStr += "\nNb Triangles = " + std::to_string(S_NbTriangles) + "\t(PageUp : x2, PageDown : /2)";
-      HUDTextStr += "\nPause :" + std::string(S_Pause ? "ON" : "OFF") + "\t(Space : toggle ON/OFF)";
+      HUDTextStr += "\nPause : " + std::string(S_Pause ? "ON" : "OFF") + "\t(Space : toggle ON/OFF)";
       HUDTextStr += "\nBackFace Culling : " + std::string(rasterizer->GetBackfaceCullingEnabled() ? "Enabled" : "Disabled") + "\t( C : toggle ON/OFF )";
        
       if ( (S_TestNum == 1) || (S_TestNum == 2) )

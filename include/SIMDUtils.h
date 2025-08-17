@@ -1,12 +1,7 @@
 #pragma once
 
-// Configuration des warnings pour differents compilateurs
-#ifdef _MSC_VER
-#pragma warning(disable: 4324) // Disable structure padding warning
-#elif defined(__clang__) || defined(__GNUC__)
-// Pour Clang/GCC, les warnings de padding sont moins frequents
-#pragma GCC diagnostic ignored "-Wpadded"
-#endif
+#include <iostream>
+#include <iomanip>
 
 // Detection de la plateforme SIMD
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
@@ -30,8 +25,17 @@
 #include <intrin.h> // Pour __cpuid
 #endif
 
-#include <iostream>
-#include <iomanip>
+#ifndef SIMD_ALIGN
+#define SIMD_ALIGN alignas(32)
+#endif
+
+// Configuration des warnings pour differents compilateurs
+#ifdef _MSC_VER
+#pragma warning(disable: 4324) // Disable structure padding warning
+#elif defined(__clang__) || defined(__GNUC__)
+// Pour Clang/GCC, les warnings de padding sont moins frequents
+#pragma GCC diagnostic ignored "-Wpadded"
+#endif
 
 // Utilitaires SIMD pour tests et validation
 namespace SIMDUtils

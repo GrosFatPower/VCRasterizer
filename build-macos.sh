@@ -65,23 +65,23 @@ echo "✅ Compilation réussie!"
 echo ""
 
 # Vérifier que l'exécutable existe
-if [ -f "bin/VCRasterizer" ]; then
+if [ -f "bin/Release/VCRasterizer" ]; then
     echo "✅ Exécutable trouvé: bin/VCRasterizer"
     
     # Afficher des informations sur l'exécutable
     echo ""
     echo "=== Informations sur l'exécutable ==="
-    file bin/VCRasterizer
+    file bin/Release/VCRasterizer
     
     # Vérifier les dépendances
     echo ""
     echo "=== Dépendances dynamiques ==="
-    otool -L bin/VCRasterizer
+    otool -L bin/Release/VCRasterizer
     
-    echo ""
-    echo "=== Test de lancement (5 secondes) ==="
-    echo "Tentative de lancement de l'application..."
-    timeout 5s ./bin/VCRasterizer || echo "Test de lancement terminé"
+    #echo ""
+    #echo "=== Test de lancement (5 secondes) ==="
+    #echo "Tentative de lancement de l'application..."
+    #timeout 5s ./bin/Release/VCRasterizer || echo "Test de lancement terminé"
     
 else
     echo "❌ Exécutable non trouvé dans bin/"
@@ -93,7 +93,7 @@ fi
 echo ""
 echo "=== Instructions d'utilisation ==="
 echo "Pour lancer l'application:"
-echo "  cd build && ./bin/VCRasterizer"
+echo "  cd build && ./bin/Release/VCRasterizer"
 echo ""
 echo "Contrôles dans l'application:"
 echo "  F1 : Rasterizer logiciel simple"

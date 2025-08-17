@@ -11,7 +11,9 @@
 // Detection de la plateforme SIMD
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
 #include <arm_neon.h>
+#ifndef SIMD_ARM_NEON
 #define SIMD_ARM_NEON
+#endif
 #elif defined(__AVX2__)
 #include <immintrin.h>
 #ifndef SIMD_AVX2
@@ -28,6 +30,8 @@
 #include <intrin.h> // Pour __cpuid
 #endif
 
+#include <iostream>
+#include <iomanip>
 
 // Utilitaires SIMD pour tests et validation
 namespace SIMDUtils
@@ -90,7 +94,7 @@ namespace SIMDUtils
     }
   }
 
-  inline uint32x4_t GetVectorElement(uint32_t value, uint32x4_t& vector, int index)
+  inline uint32x4_t SetVectorElement(uint32_t value, uint32x4_t& vector, int index)
   {
     switch (index)
     {

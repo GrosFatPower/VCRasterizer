@@ -29,3 +29,4 @@ build/
 *.vcxproj.user
 *.vcxproj.filters
 *.sln
+.DS_Store

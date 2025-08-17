@@ -9,10 +9,15 @@ class FPSCounter
 public:
   FPSCounter() : lastUpdate(std::chrono::high_resolution_clock::now()) {}
 
+  double getFPS() const { return currentFPS; }
+
   void update()
-   {
+  {
     auto now = std::chrono::high_resolution_clock::now();
     frameTimestamps.push_back(now);
+
+    if ( now - lastUpdate < std::chrono::duration<double>(WINDOW_SIZE) )
+      return; // Pas assez de temps écoulé pour mettre à jour
 
     // Remove frames older than WINDOW_SIZE seconds
     auto oneSecondAgo = now - std::chrono::duration<double>(WINDOW_SIZE);
@@ -26,13 +31,11 @@ public:
     lastUpdate = now;
   }
 
-  double getFPS() const { return currentFPS; }
-
   double getLastFrameTime() const
- {
-    if (frameTimestamps.size() < 2) return 0.0;
-    auto duration = std::chrono::duration<double, std::milli>(
-      frameTimestamps.back() - *(frameTimestamps.end() - 2));
+  {
+    if (frameTimestamps.size() < 2)
+      return 0.0;
+    auto duration = std::chrono::duration<double, std::milli>(frameTimestamps.back() - *(frameTimestamps.end() - 2));
     return duration.count();
   }
 

@@ -15,11 +15,9 @@
 MultiThreadedSIMDRasterizer::MultiThreadedSIMDRasterizer(int w, int h, int numThreads)
 : Renderer(w, h)
 {
-  // Calcul du nombre de tuiles
   _TileCountX = (_ScreenWidth + TILE_SIZE - 1) / TILE_SIZE;
   _TileCountY = (_ScreenHeight + TILE_SIZE - 1) / TILE_SIZE;
 
-  // Initialisation des tuiles
   _Tiles.reserve(_TileCountX * _TileCountY);
   for (int ty = 0; ty < _TileCountY; ++ty)
   {
@@ -49,8 +47,8 @@ MultiThreadedSIMDRasterizer::~MultiThreadedSIMDRasterizer()
 {
   {
     std::unique_lock<std::mutex> lock(_RenderMutex);
-    _ThreadsShouldRunAtomic = false; // Signal threads to exit
-    _RenderingActiveAtomic = false;
+    _ThreadsShouldRunAtomic.store(false); // Signal threads to exit
+    _RenderingActiveAtomic.store(false);
   }
   _RenderCV.notify_all(); // Wake up all threads
 
@@ -122,10 +120,8 @@ void MultiThreadedSIMDRasterizer::RenderTrianglesInBatch(const glm::mat4& mvp)
             tri.screenVertices[v] = TransformVertex(_Triangles[j].vertices[v], mvp);
 
           // Backface culling
-          glm::vec2 edge1 = glm::vec2(tri.screenVertices[1].x - tri.screenVertices[0].x,
-            tri.screenVertices[1].y - tri.screenVertices[0].y);
-          glm::vec2 edge2 = glm::vec2(tri.screenVertices[2].x - tri.screenVertices[0].x,
-            tri.screenVertices[2].y - tri.screenVertices[0].y);
+          glm::vec2 edge1 = glm::vec2(tri.screenVertices[1].x - tri.screenVertices[0].x, tri.screenVertices[1].y - tri.screenVertices[0].y);
+          glm::vec2 edge2 = glm::vec2(tri.screenVertices[2].x - tri.screenVertices[0].x, tri.screenVertices[2].y - tri.screenVertices[0].y);
 
           float crossProduct = edge1.x * edge2.y - edge1.y * edge2.x;
 
@@ -166,11 +162,9 @@ void MultiThreadedSIMDRasterizer::RenderTrianglesInBatch(const glm::mat4& mvp)
 //-----------------------------------------------------------------------------
 void MultiThreadedSIMDRasterizer::BinTrianglesToTiles()
 {
-  // Clear les listes de triangles des tuiles
   for (auto& tile : _Tiles)
     tile.triangles.clear();
 
-  // Pour chaque triangle, determiner quelles tuiles il intersecte
   for (const auto& tri : _Transformed)
   {
     if (!tri.valid)
@@ -218,11 +212,10 @@ void MultiThreadedSIMDRasterizer::WorkerThreadFunction()
   {
     std::unique_lock<std::mutex> lock(_RenderMutex);
     _RenderCV.wait(lock, [this] {
-      return _RenderingActiveAtomic.load() || !_ThreadsShouldRunAtomic; // Check for exit condition
+      return _RenderingActiveAtomic.load() || !_ThreadsShouldRunAtomic.load(); // Check for exit condition
       });
 
-    // Exit thread if shutdown is requested
-    if (!_ThreadsShouldRunAtomic)
+    if (!_ThreadsShouldRunAtomic.load())
       break;
 
     while (_RenderingActiveAtomic.load())
@@ -281,9 +274,9 @@ void MultiThreadedSIMDRasterizer::RenderTriangleInTile1x(const TransformedTriang
 
   // Intersection avec la tuile
   int startX = std::max(tile.x, (int)std::floor(minX));
-  int endX = std::min(tile.x + tile.width - 1, (int)std::ceil(maxX));
+  int endX   = std::min(tile.x + tile.width - 1, (int)std::ceil(maxX));
   int startY = std::max(tile.y, (int)std::floor(minY));
-  int endY = std::min(tile.y + tile.height - 1, (int)std::ceil(maxY));
+  int endY   = std::min(tile.y + tile.height - 1, (int)std::ceil(maxY));
 
   // Rasterization par blocs de pixels
   for (int y = startY; y <= endY; ++y)
@@ -313,9 +306,9 @@ void MultiThreadedSIMDRasterizer::RenderTriangleInTile1x(const TransformedTriang
 //-----------------------------------------------------------------------------
 void MultiThreadedSIMDRasterizer::SetupTriangleData(TransformedTriangle& tri)
 {
-  const auto& v0 = tri.screenVertices[0];
-  const auto& v1 = tri.screenVertices[1];
-  const auto& v2 = tri.screenVertices[2];
+  const auto & v0 = tri.screenVertices[0];
+  const auto & v1 = tri.screenVertices[1];
+  const auto & v2 = tri.screenVertices[2];
 
   // Edge 0: v1 -> v2
   tri.edgeA[0] = v1.y - v2.y;
@@ -333,9 +326,9 @@ void MultiThreadedSIMDRasterizer::SetupTriangleData(TransformedTriangle& tri)
   tri.edgeC[2] = v0.x * v1.y - v1.x * v0.y;
 
   // Inverses des profondeurs pour interpolation
-  tri.invDepths[0] = (v0.w != 0.0f) ? 1.0f / v0.w : 0.0f;
-  tri.invDepths[1] = (v1.w != 0.0f) ? 1.0f / v1.w : 0.0f;
-  tri.invDepths[2] = (v2.w != 0.0f) ? 1.0f / v2.w : 0.0f;
+  tri.invDepths[0] = (v0.w != 0.0f) ? ( 1.0f / v0.w ) : 0.0f;
+  tri.invDepths[1] = (v1.w != 0.0f) ? ( 1.0f / v1.w ) : 0.0f;
+  tri.invDepths[2] = (v2.w != 0.0f) ? ( 1.0f / v2.w ) : 0.0f;
 }
 
 //-----------------------------------------------------------------------------
@@ -345,6 +338,7 @@ glm::vec4 MultiThreadedSIMDRasterizer::TransformVertex(const glm::vec3& vertex, 
 {
   glm::vec4 clipSpace = mvp * glm::vec4(vertex, 1.0f);
 
+  // to NDC
   if (clipSpace.w != 0.0f)
   {
     clipSpace.x /= clipSpace.w;
@@ -352,6 +346,7 @@ glm::vec4 MultiThreadedSIMDRasterizer::TransformVertex(const glm::vec3& vertex, 
     clipSpace.z /= clipSpace.w;
   }
 
+  // To screen space
   float x = (clipSpace.x + 1.0f) * 0.5f * _ScreenWidth;
   float y = (1.0f - clipSpace.y) * 0.5f * _ScreenHeight;
   //float z = clipSpace.z;
@@ -424,8 +419,8 @@ void MultiThreadedSIMDRasterizer::RenderTriangles(const glm::mat4& mvp)
   BinTrianglesToTiles();
 
   // 3. Rendu multi-threade
-  _NextTileIndexAtomic = 0;
-  _RenderingActiveAtomic = true;
+  _NextTileIndexAtomic.store(0);
+  _RenderingActiveAtomic.store(true);
   _RenderCV.notify_all();
 
   // Attendre que tous les threads finissent
@@ -434,7 +429,7 @@ void MultiThreadedSIMDRasterizer::RenderTriangles(const glm::mat4& mvp)
     _TilesDoneCV.wait(lock, [this] { return _NextTileIndexAtomic.load() >= _Tiles.size(); });
   }
 
-  _RenderingActiveAtomic = false;
+  _RenderingActiveAtomic.store(false);
 }
 
 //-----------------------------------------------------------------------------
@@ -446,7 +441,7 @@ bool MultiThreadedSIMDRasterizer::TestPixels1x(float x, float y, const Transform
   for (int edge = 0; edge < 3; ++edge)
   {
     float edgeValue = tri.edgeA[edge] * x + tri.edgeB[edge] * y + tri.edgeC[edge];
-    if (edgeValue < 0.0f)
+    if ( edgeValue < 0.0f )
       return false;
   }
   return true;
@@ -457,13 +452,14 @@ bool MultiThreadedSIMDRasterizer::TestPixels1x(float x, float y, const Transform
 //-----------------------------------------------------------------------------
 float MultiThreadedSIMDRasterizer::InterpolateDepth1x(float x, float y, const TransformedTriangle& tri)
 {
+  // Calcul des coordonnees barycentriques
   float alpha = tri.edgeA[0] * x + tri.edgeB[0] * y + tri.edgeC[0];
-  float beta = tri.edgeA[1] * x + tri.edgeB[1] * y + tri.edgeC[1];
+  float beta  = tri.edgeA[1] * x + tri.edgeB[1] * y + tri.edgeC[1];
   float gamma = tri.edgeA[2] * x + tri.edgeB[2] * y + tri.edgeC[2];
 
   float inv_area = 1.0f / tri.area;
   alpha *= inv_area;
-  beta *= inv_area;
+  beta  *= inv_area;
   gamma *= inv_area;
 
   // Interpolation lineaire de 1/Z
@@ -482,7 +478,8 @@ float MultiThreadedSIMDRasterizer::InterpolateDepth1x(float x, float y, const Tr
 #ifdef SIMD_AVX2
 void MultiThreadedSIMDRasterizer::RenderTriangleInTile8x(const TransformedTriangle& tri, const Tile& tile)
 {
-  if (!tri.valid) return;
+  if (!tri.valid)
+    return;
 
   float minX = std::min({ tri.screenVertices[0].x, tri.screenVertices[1].x, tri.screenVertices[2].x });
   float maxX = std::max({ tri.screenVertices[0].x, tri.screenVertices[1].x, tri.screenVertices[2].x });
@@ -490,29 +487,29 @@ void MultiThreadedSIMDRasterizer::RenderTriangleInTile8x(const TransformedTriang
   float maxY = std::max({ tri.screenVertices[0].y, tri.screenVertices[1].y, tri.screenVertices[2].y });
 
   int startX = std::max(tile.x, static_cast<int>(std::floor(minX)));
-  int endX = std::min(tile.x + tile.width - 1, static_cast<int>(std::ceil(maxX)));
+  int endX   = std::min(tile.x + tile.width - 1, static_cast<int>(std::ceil(maxX)));
   int startY = std::max(tile.y, static_cast<int>(std::floor(minY)));
-  int endY = std::min(tile.y + tile.height - 1, static_cast<int>(std::ceil(maxY)));
+  int endY   = std::min(tile.y + tile.height - 1, static_cast<int>(std::ceil(maxY)));
 
   for (int y = startY; y <= endY; ++y)
   {
     for (int x = startX; x <= endX; x += 8)
     {
-      __m256i inside_mask = TestPixels8x(static_cast<float>(x) + 0.5f,
-        static_cast<float>(y) + 0.5f, tri);
+      __m256i inside_mask = TestPixels8x(static_cast<float>(x) + 0.5f, static_cast<float>(y) + 0.5f, tri);
 
       float depths[8];
-      InterpolateDepth8x(static_cast<float>(x) + 0.5f,
-        static_cast<float>(y) + 0.5f, tri, depths);
+      InterpolateDepth8x(static_cast<float>(x) + 0.5f, static_cast<float>(y) + 0.5f, tri, depths);
 
       for (int i = 0; i < 8 && (x + i) <= endX; ++i)
       {
         int mask_bit = (_mm256_movemask_ps(_mm256_castsi256_ps(inside_mask)) >> i) & 1;
-        if (mask_bit) {
+        if (mask_bit)
+        {
           int pixelX = x + i;
           int pixelIndex = y * _ScreenWidth + pixelX;
 
-          if (depths[i] < _DepthBuffer[pixelIndex]) {
+          if (depths[i] < _DepthBuffer[pixelIndex])
+          {
             _DepthBuffer[pixelIndex] = depths[i];
             _ColorBuffer[pixelIndex] = tri.color;
           }
@@ -548,11 +545,10 @@ uint32x4_t MultiThreadedSIMDRasterizer::TestPixels4x(float startX, float y, cons
   {
     float x = SIMDUtils::GetVectorElement(x_coords, i);
 
-    // Calcul des 3 fonctions d'arete pour ce pixel
+    // Calcul des 3 edge_values pour ce pixel
+    // edge_values = A * x + B * y + C
     float32x4_t x_vec = vdupq_n_f32(x);
     float32x4_t y_vec = vdupq_n_f32(y);
-
-    // edge_values = A * x + B * y + C
     float32x4_t ax = vmulq_f32(edgeA_vec, x_vec);
     float32x4_t by = vmulq_f32(edgeB_vec, y_vec);
     float32x4_t edge_values = vaddq_f32(vaddq_f32(ax, by), edgeC_vec);
@@ -561,9 +557,7 @@ uint32x4_t MultiThreadedSIMDRasterizer::TestPixels4x(float startX, float y, cons
     uint32x4_t ge_zero = vcgeq_f32(edge_values, vdupq_n_f32(0.0f));
 
     // Le pixel est e l'interieur si les 3 premieres valeurs sont >= 0
-    uint32_t inside = vgetq_lane_u32(ge_zero, 0) &
-      vgetq_lane_u32(ge_zero, 1) &
-      vgetq_lane_u32(ge_zero, 2);
+    uint32_t inside = vgetq_lane_u32(ge_zero, 0) & vgetq_lane_u32(ge_zero, 1) & vgetq_lane_u32(ge_zero, 2);
 
     // Stocker le resultat
     results = SIMDUtils::SetVectorElement(inside, results, i);
@@ -592,7 +586,8 @@ void MultiThreadedSIMDRasterizer::InterpolateDepth4x(float startX, float y, cons
   // Chargement des profondeurs inverses
   float32x4_t inv_depths = vld1q_f32(&tri.invDepths[0]); // 1/Z0, 1/Z1, 1/Z2, 0
 
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < 4; i++)
+  {
     float x = SIMDUtils::GetVectorElement(x_coords, i);
 
     // Calcul des coordonnees barycentriques
@@ -627,7 +622,8 @@ void MultiThreadedSIMDRasterizer::InterpolateDepth4x(float startX, float y, cons
 #ifdef SIMD_ARM_NEON
 void MultiThreadedSIMDRasterizer::RenderTriangleInTile4x(const TransformedTriangle& tri, const Tile& tile)
 {
-  if (!tri.valid) return;
+  if (!tri.valid)
+    return;
 
   // Bounding box du triangle dans la tuile
   float minX = std::max(tri.screenVertices[0].x, tri.screenVertices[1].x);
@@ -635,7 +631,8 @@ void MultiThreadedSIMDRasterizer::RenderTriangleInTile4x(const TransformedTriang
   float maxX = std::min(tri.screenVertices[0].x, tri.screenVertices[1].x);
   maxX = std::min(maxX, tri.screenVertices[2].x);
 
-  for (int i = 0; i < 3; i++) {
+  for (int i = 0; i < 3; i++)
+  {
     minX = std::min(minX, tri.screenVertices[i].x);
     maxX = std::max(maxX, tri.screenVertices[i].x);
   }
@@ -650,20 +647,22 @@ void MultiThreadedSIMDRasterizer::RenderTriangleInTile4x(const TransformedTriang
   int endY = std::min(tile.y + tile.height - 1, static_cast<int>(std::ceil(maxY)));
 
   // Rasterisation par blocs de 4 pixels horizontalement
-  for (int y = startY; y <= endY; ++y) {
-    for (int x = startX; x <= endX; x += 4) {
+  for (int y = startY; y <= endY; ++y)
+  {
+    for (int x = startX; x <= endX; x += 4)
+    {
       // Test des 4 pixels
-      uint32x4_t inside_mask = TestPixels4x(static_cast<float>(x) + 0.5f,
-        static_cast<float>(y) + 0.5f, tri);
+      uint32x4_t inside_mask = TestPixels4x(static_cast<float>(x) + 0.5f, static_cast<float>(y) + 0.5f, tri);
 
       // Interpolation des profondeurs pour les 4 pixels
       float depths[4];
-      InterpolateDepth4x(static_cast<float>(x) + 0.5f,
-        static_cast<float>(y) + 0.5f, tri, depths);
+      InterpolateDepth4x(static_cast<float>(x) + 0.5f, static_cast<float>(y) + 0.5f, tri, depths);
 
       // Test de profondeur et ecriture pour chaque pixel
-      for (int i = 0; i < 4 && (x + i) <= endX; ++i) {
-        if (SIMDUtils::GetVectorElement(inside_mask, i)) {
+      for (int i = 0; i < 4 && (x + i) <= endX; ++i)
+      {
+        if (SIMDUtils::GetVectorElement(inside_mask, i)) 
+        {
           int pixelX = x + i;
           int pixelIndex = y * _ScreenWidth + pixelX;
 
@@ -678,7 +677,6 @@ void MultiThreadedSIMDRasterizer::RenderTriangleInTile4x(const TransformedTriang
 }
 #endif // SIMD_ARM_NEON
 
-
 //-----------------------------------------------------------------------------
 // TestPixels8x
 // Version AVX2 pour comparaison (8 pixels)
@@ -687,14 +685,14 @@ void MultiThreadedSIMDRasterizer::RenderTriangleInTile4x(const TransformedTriang
 __m256i MultiThreadedSIMDRasterizer::TestPixels8x(float startX, float y, const TransformedTriangle& tri)
 {
   // Coordonnees des 8 pixels
-  __m256 x_coords = _mm256_set_ps(startX + 7.0f, startX + 6.0f, startX + 5.0f, startX + 4.0f,
-    startX + 3.0f, startX + 2.0f, startX + 1.0f, startX);
+  __m256 x_coords = _mm256_set_ps(startX + 7.0f, startX + 6.0f, startX + 5.0f, startX + 4.0f, startX + 3.0f, startX + 2.0f, startX + 1.0f, startX);
   __m256 y_coord = _mm256_set1_ps(y);
 
   __m256i results = _mm256_setzero_si256();
 
   // Test pour chaque arete
-  for (int edge = 0; edge < 3; ++edge) {
+  for (int edge = 0; edge < 3; ++edge)
+  {
     __m256 edgeA = _mm256_set1_ps(tri.edgeA[edge]);
     __m256 edgeB = _mm256_set1_ps(tri.edgeB[edge]);
     __m256 edgeC = _mm256_set1_ps(tri.edgeC[edge]);
@@ -708,12 +706,10 @@ __m256i MultiThreadedSIMDRasterizer::TestPixels8x(float startX, float y, const T
     __m256 ge_zero = _mm256_cmp_ps(edge_values, _mm256_setzero_ps(), _CMP_GE_OQ);
     __m256i ge_zero_int = _mm256_castps_si256(ge_zero);
 
-    if (edge == 0) {
+    if (edge == 0)
       results = ge_zero_int;
-    }
-    else {
+    else
       results = _mm256_and_si256(results, ge_zero_int);
-    }
   }
 
   return results;
@@ -726,15 +722,15 @@ __m256i MultiThreadedSIMDRasterizer::TestPixels8x(float startX, float y, const T
 #ifdef SIMD_AVX2
 void MultiThreadedSIMDRasterizer::InterpolateDepth8x(float startX, float y, const TransformedTriangle& tri, float* output)
 {
-  __m256 x_coords = _mm256_set_ps(startX + 7.0f, startX + 6.0f, startX + 5.0f, startX + 4.0f,
-    startX + 3.0f, startX + 2.0f, startX + 1.0f, startX);
+  __m256 x_coords = _mm256_set_ps(startX + 7.0f, startX + 6.0f, startX + 5.0f, startX + 4.0f, startX + 3.0f, startX + 2.0f, startX + 1.0f, startX);
   __m256 y_coord = _mm256_set1_ps(y);
   __m256 inv_area = _mm256_set1_ps(1.0f / tri.area);
 
   // Calcul des coordonnees barycentriques pour les 8 pixels
   __m256 w0 = _mm256_setzero_ps(), w1 = _mm256_setzero_ps(), w2 = _mm256_setzero_ps();
 
-  for (int edge = 0; edge < 3; ++edge) {
+  for (int edge = 0; edge < 3; ++edge)
+  {
     __m256 edgeA = _mm256_set1_ps(tri.edgeA[edge]);
     __m256 edgeB = _mm256_set1_ps(tri.edgeB[edge]);
     __m256 edgeC = _mm256_set1_ps(tri.edgeC[edge]);
@@ -757,10 +753,7 @@ void MultiThreadedSIMDRasterizer::InterpolateDepth8x(float startX, float y, cons
   __m256 invZ1 = _mm256_set1_ps(tri.invDepths[1]);
   __m256 invZ2 = _mm256_set1_ps(tri.invDepths[2]);
 
-  __m256 interpolated_invZ = _mm256_add_ps(
-    _mm256_add_ps(_mm256_mul_ps(w0, invZ0), _mm256_mul_ps(w1, invZ1)),
-    _mm256_mul_ps(w2, invZ2)
-  );
+  __m256 interpolated_invZ = _mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(w0, invZ0), _mm256_mul_ps(w1, invZ1)), _mm256_mul_ps(w2, invZ2));
 
   // Conversion en profondeur Z = 1 / (1/Z)
   __m256 one = _mm256_set1_ps(1.0f);

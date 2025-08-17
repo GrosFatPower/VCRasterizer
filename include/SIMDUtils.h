@@ -66,4 +66,42 @@ namespace SIMDUtils
       return false; // ARM platforms don't support AVX512
     #endif
   }
+
+#ifdef SIMD_ARM_NEON
+  inline float GetVectorElement(float32x4_t& vector, int index)
+  {
+    switch (index) {
+    case 0: return vgetq_lane_f32(vector, 0);
+    case 1: return vgetq_lane_f32(vector, 1);
+    case 2: return vgetq_lane_f32(vector, 2);
+    case 3: return vgetq_lane_f32(vector, 3);
+    default: throw std::out_of_range("Invalid vector index");
+    }
+  }
+
+  inline uint32_t GetVectorElement(uint32x4_t& vector, int index)
+  {
+    switch (index) {
+    case 0: return vgetq_lane_u32(vector, 0);
+    case 1: return vgetq_lane_u32(vector, 1);
+    case 2: return vgetq_lane_u32(vector, 2);
+    case 3: return vgetq_lane_u32(vector, 3);
+    default: throw std::out_of_range("Invalid vector index");
+    }
+  }
+
+  inline uint32x4_t GetVectorElement(uint32_t value, uint32x4_t& vector, int index)
+  {
+    switch (index)
+    {
+    case 0: return vsetq_lane_u32(value, vector, 0);
+    case 1: return vsetq_lane_u32(value, vector, 1);
+    case 2: return vsetq_lane_u32(value, vector, 2);
+    case 3: return vsetq_lane_u32(value, vector, 3);
+    default: throw std::out_of_range("Invalid vector index");
+    }
+
+    return vector; // Should never reach here
+  }
+#endif // SIMD_ARM_NEON
 }

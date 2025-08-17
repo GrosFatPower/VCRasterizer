@@ -82,17 +82,9 @@ int main()
     // On peut continuer sans font ou créer une police par défaut
   }
 
-  std::string headerTextStr = "Triangle rasterizer";
-  sf::Text headerText(font, headerTextStr, 16);
-  headerText.setPosition({ 5., 5. });
-
-  std::string nbTrisTextStr = "Nb Triangles = " + std::to_string(S_NbTriangles) + " (PageUp : x2, PageDown : /2)";
-  sf::Text nbTrisText(font, nbTrisTextStr, 16);
-  nbTrisText.setPosition({ 5., 25. });
-
-  std::string optionsTextStr = "S : toggle SIMD, C : toggle backFace culling, SPACE : toggle pause";
-  sf::Text optionsText(font, optionsTextStr, 16);
-  optionsText.setPosition({ 5., 45. });
+  std::string HUDTextStr = "Triangle rasterizer";
+  sf::Text HUD(font, HUDTextStr, 16);
+  HUD.setPosition({ 5., 5. });
 
   sf::Sprite sprite(texture);
 
@@ -105,6 +97,7 @@ int main()
 
   bool reloadRenderer = true;
   bool reloadScene = true;
+  bool updateHUD = true;
 
   while (window.isOpen())
   {
@@ -147,26 +140,17 @@ int main()
         else if (keyEvent && keyEvent->code == sf::Keyboard::Key::S && rasterizer)
         {
           rasterizer->SetEnableSIMD(!rasterizer->GetEnableSIMD());
-          if (rasterizer->GetEnableSIMD())
-            std::cout << "SIMD : Enabled" << std::endl;
-          else
-            std::cout << "SIMD : Disabled" << std::endl;
+          updateHUD = true;
         }
         else if (keyEvent && keyEvent->code == sf::Keyboard::Key::C && rasterizer)
         {
           rasterizer->SetBackfaceCullingEnabled(!rasterizer->GetBackfaceCullingEnabled());
-          if (rasterizer->GetBackfaceCullingEnabled())
-            std::cout << "BackfaceCulling : Enabled" << std::endl;
-          else
-            std::cout << "BackfaceCulling : Disabled" << std::endl;
+          updateHUD = true;
         }
         else if (keyEvent && keyEvent->code == sf::Keyboard::Key::Space)
         {
           pause = !pause;
-          if (pause)
-            std::cout << "Paused" << std::endl;
-          else
-            std::cout << "Resumed" << std::endl;
+          updateHUD = true;
         }
       }
     }
@@ -182,35 +166,26 @@ int main()
         return -1;
       }
 
-      if (S_TestNum == 0)
-        headerTextStr = "Single threaded Rasterizer - Press F2 for SIMD or F3 for Optimized SIMD";
-      else if (S_TestNum == 1)
-        headerTextStr = "Multi-Threaded SIMD Rasterizer - Press F1 for Software or F3 for Optimized SIMD";
-      else if (S_TestNum == 2)
+      if (S_TestNum == 2)
       {
-        headerTextStr = "Optimized Multi-Threaded SIMD Rasterizer - Press F1 for Software or Press F2 for SIMD";
-        //rasterizer -> SetRenderMode(RenderMode::AVX2);
+        dynamic_cast<OptimizedMultiThreadedSIMDRasterizer*>(rasterizer.get())->SetRenderMode(OptimizedMultiThreadedSIMDRasterizer::RenderMode::AVX2);
         rasterizer->SetEnableSIMD(true);
         rasterizer->SetBackfaceCullingEnabled(true);
       }
-      headerText = sf::Text(font, headerTextStr, 16);
-      headerText.setPosition({ 5., 5. });
 
       reloadRenderer = false;
       if (!reloadScene && (triangles.size() > 0))
         rasterizer->SetTriangles(triangles);
       else
         reloadScene = true;
+      updateHUD = true;
     }
 
     if (reloadScene)
     {
-      nbTrisTextStr = "Nb Triangles = " + std::to_string(S_NbTriangles) + " (PageUp : x2, PageDown : /2)";
-      nbTrisText = sf::Text(font, nbTrisTextStr, 16);
-      nbTrisText.setPosition({ 5., 25. });
-
       rasterizer->InitScene(S_NbTriangles);
       reloadScene = false;
+      updateHUD = true;
     }
 
     rasterizer->RenderRotatingScene(time);
@@ -219,12 +194,32 @@ int main()
     const uint32_t* pixels = rasterizer->GetColorBuffer();
     texture.update(reinterpret_cast<const std::uint8_t*>(pixels));
 
+    if (updateHUD)
+    {
+      if (S_TestNum == 0)
+        HUDTextStr = "Single threaded Rasterizer - Press F2 for SIMD or F3 for Optimized SIMD";
+      else if (S_TestNum == 1)
+        HUDTextStr = "Multi-Threaded SIMD Rasterizer - Press F1 for Software or F3 for Optimized SIMD";
+      else if (S_TestNum == 2)
+        HUDTextStr = "Optimized Multi-Threaded SIMD Rasterizer - Press F1 for Software or Press F2 for SIMD";
+
+      HUDTextStr += "\nNb Triangles = " + std::to_string(S_NbTriangles) + "\t(PageUp : x2, PageDown : /2)";
+      HUDTextStr += "\nPause :" + std::string(pause ? "ON" : "OFF") + "\t(Space : toggle ON/OFF)";
+      HUDTextStr += "\nBackFace Culling : " + std::string(rasterizer->GetBackfaceCullingEnabled() ? "Enabled" : "Disabled") + "\t( C : toggle ON/OFF )";
+       
+      if ( (S_TestNum == 1) || (S_TestNum == 2) )
+      {
+        HUDTextStr += "\nSIMD : " + std::string(rasterizer->GetEnableSIMD() ? "Enabled" : "Disabled") + "\t( S : toggle ON/OFF )";
+      }
+
+      HUD.setString(HUDTextStr);
+
+      updateHUD = false;
+    }
+
     window.clear();
     window.draw(sprite);
-    window.draw(headerText);
-    window.draw(nbTrisText);
-    if (S_TestNum == 1)
-      window.draw(optionsText);
+    window.draw(HUD);
     window.display();
 
     window.setTitle("Vibe Coded Rasterizer - FPS: " + std::to_string(static_cast<int>(fpsCounter.getFPS())));

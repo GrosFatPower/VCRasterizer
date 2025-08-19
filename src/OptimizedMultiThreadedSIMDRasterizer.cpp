@@ -533,12 +533,8 @@ void OptimizedMultiThreadedSIMDRasterizer::RenderTile(const Tile& tile, ThreadLo
   const TileData& tileData = _OptimizedTiles[tileIndex];
 
   // Clear du tile local
-  const __m256i clearColor = _mm256_set1_epi32(0xADD8E6FF);
-  const __m256 clearDepth = _mm256_set1_ps(G_INFINITY);
-
   std::fill(_ColorBuffer.begin(), _ColorBuffer.end(), 0xADD8E6FF);
   std::fill(_DepthBuffer.begin(), _DepthBuffer.end(), G_INFINITY);
-
 
   // Rendu de tous les triangles du tile
   for (const TransformedTriangle* tri : tileData._Triangles)

@@ -74,7 +74,7 @@ protected:
 
 protected:
   // Pipeline de rendu optimise
-  void Clear(uint32_t color = 0xADD8E6FF);
+  void Clear(uint32_t color = G_DEFAULT_COLOR);
   void HierarchicalBinning();
   void RenderTrianglesMultiThreaded();
 
@@ -100,7 +100,7 @@ protected:
   void InitializeLookupTables();
 
 #ifdef SIMD_AVX2
-  void Clear8x(uint32_t color = 0xADD8E6FF);
+  void Clear8x(uint32_t color = G_DEFAULT_COLOR);
 
   void TransformTrianglesAVX2(const glm::mat4& mvp);
 

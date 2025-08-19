@@ -128,16 +128,16 @@ void OptimizedMultiThreadedSIMDRasterizer::RenderRotatingScene(float time)
   if ( GetEnableSIMD() )
   {
 #ifdef SIMD_AVX2
-    Clear8x(0xADD8E6FF); // Utilisation de la version AVX2 pour le clear
+    Clear8x(G_DEFAULT_COLOR); // Utilisation de la version AVX2 pour le clear
     TransformTrianglesAVX2(mvp);
 #else
-    Clear(0xADD8E6FF);
+    Clear(G_DEFAULT_COLOR);
     TransformTriangles(mvp);
 #endif
   }
   else
   {
-    Clear(0xADD8E6FF);
+    Clear(G_DEFAULT_COLOR);
     TransformTriangles(mvp);
   }
 
@@ -533,8 +533,11 @@ void OptimizedMultiThreadedSIMDRasterizer::RenderTile(const Tile& tile, ThreadLo
   const TileData& tileData = _OptimizedTiles[tileIndex];
 
   // Clear du tile local
-  std::fill(_ColorBuffer.begin(), _ColorBuffer.end(), 0xADD8E6FF);
-  std::fill(_DepthBuffer.begin(), _DepthBuffer.end(), G_INFINITY);
+  for ( int x=0; x < ( tile.width * tile.height); ++x )
+  {
+    localData -> _ColorBuffer[x] = G_DEFAULT_COLOR;
+    localData -> _DepthBuffer[x] = G_INFINITY;
+  }
 
   // Rendu de tous les triangles du tile
   for (const TransformedTriangle* tri : tileData._Triangles)
@@ -707,7 +710,7 @@ void OptimizedMultiThreadedSIMDRasterizer::RenderTileAVX2(const Tile& tile, Thre
   const TileData& tileData = _OptimizedTiles[tileIndex];
 
   // Clear du tile local
-  const __m256i clearColor = _mm256_set1_epi32(0xADD8E6FF);
+  const __m256i clearColor = _mm256_set1_epi32(G_DEFAULT_COLOR);
   const __m256 clearDepth = _mm256_set1_ps(G_INFINITY);
 
   const int tilePixels = tile.width * tile.height;

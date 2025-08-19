@@ -387,7 +387,7 @@ void MultiThreadedSIMDRasterizer::SetTriangles(const std::vector<Triangle>& tria
 //-----------------------------------------------------------------------------
 void MultiThreadedSIMDRasterizer::RenderRotatingScene(float time)
 {
-  Clear(0xADD8E6FF);
+  Clear(G_DEFAULT_COLOR);
 
   // Matrices de transformation
   glm::mat4 model = glm::rotate(glm::mat4(1.0f), time, glm::vec3(0, 1, 0)); // Rotation Y

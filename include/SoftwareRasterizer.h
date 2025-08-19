@@ -20,7 +20,7 @@ public:
   // Rendu d'un triangle en rotation
   virtual void RenderRotatingScene(float time)
   {
-    clear(0xADD8E6FF);
+    clear(G_DEFAULT_COLOR);
 
     // Matrices de transformation
     glm::mat4 model = glm::rotate(glm::mat4(1.0f), time, glm::vec3(0, 1, 0)); // Rotation Y

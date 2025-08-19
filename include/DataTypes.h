@@ -11,6 +11,7 @@
 
 constexpr float G_EPSILON = 1e-6f;
 constexpr float G_INFINITY = std::numeric_limits<float>::infinity();
+constexpr uint32_t G_DEFAULT_COLOR = 0xADD8E6FF; // Light blue
 
 struct Triangle
 {

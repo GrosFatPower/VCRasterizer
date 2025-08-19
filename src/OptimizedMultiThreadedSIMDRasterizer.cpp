@@ -285,29 +285,32 @@ void OptimizedMultiThreadedSIMDRasterizer::HierarchicalBinning()
     if (!tri.valid)
       continue;
 
-    // Calcul de la bounding box du triangle
+    // Bounding box du triangle
     float minX = std::min({ tri.screenVertices[0].x, tri.screenVertices[1].x, tri.screenVertices[2].x });
     float maxX = std::max({ tri.screenVertices[0].x, tri.screenVertices[1].x, tri.screenVertices[2].x });
     float minY = std::min({ tri.screenVertices[0].y, tri.screenVertices[1].y, tri.screenVertices[2].y });
     float maxY = std::max({ tri.screenVertices[0].y, tri.screenVertices[1].y, tri.screenVertices[2].y });
 
-    // Frustum culling
-    if (maxX < 0 || minX >= _ScreenWidth || maxY < 0 || minY >= _ScreenHeight)
-      continue;
+    // Clamp aux limites de l'ecran
+    minX = std::max(0.0f, minX);
+    maxX = std::min((float)_ScreenWidth - 1, maxX);
+    minY = std::max(0.0f, minY);
+    maxY = std::min((float)_ScreenHeight - 1, maxY);
 
-    // Calcul des tuiles affectees
-    int tileMinX = std::max(0, (int)(minX / TILE_SIZE));
-    int tileMaxX = std::min(_TileCountX - 1, (int)(maxX / TILE_SIZE));
-    int tileMinY = std::max(0, (int)(minY / TILE_SIZE));
-    int tileMaxY = std::min(_TileCountY - 1, (int)(maxY / TILE_SIZE));
+    // Calculer les tuiles intersectees
+    int tileMinX = (int)minX / TILE_SIZE;
+    int tileMaxX = (int)maxX / TILE_SIZE;
+    int tileMinY = (int)minY / TILE_SIZE;
+    int tileMaxY = (int)maxY / TILE_SIZE;
 
     // Ajout du triangle aux tuiles concernees
     for (int ty = tileMinY; ty <= tileMaxY; ++ty)
     {
       for (int tx = tileMinX; tx <= tileMaxX; ++tx)
       {
-        int tileIndex = ty * _TileCountX + tx;
+        if (tx < _TileCountX && ty < _TileCountY)
         {
+          int tileIndex = ty * _TileCountX + tx;
           _OptimizedTiles[tileIndex]._Triangles.push_back(&tri);
           _OptimizedTiles[tileIndex]._TriangleCountAtomic++;
           _OptimizedTiles[tileIndex]._NeedsProcessingAtomic = true;
@@ -366,9 +369,9 @@ void OptimizedMultiThreadedSIMDRasterizer::WorkerThreadFunctionOptimized(int thr
     {
       const TileData& tileData = _OptimizedTiles[tileIndex];
 
-      if (tileData._NeedsProcessingAtomic && tileData._TriangleCountAtomic >= MIN_TRIANGLES_PER_TILE)
+      if (tileData._NeedsProcessingAtomic)
       {
-        if ( GetEnableSIMD() )
+        if ( GetEnableSIMD() && ( tileData._TriangleCountAtomic >= MIN_TRIANGLES_PER_TILE ) )
         {
 #if defined(SIMD_AVX2)
           RenderTileAVX2(tileData._Tile, localData);

@@ -165,7 +165,6 @@ int main()
 
       if (S_TestNum == 2)
       {
-        //dynamic_cast<OptimizedMultiThreadedSIMDRasterizer*>(rasterizer.get())->SetRenderMode(OptimizedMultiThreadedSIMDRasterizer::RenderMode::AVX2);
         rasterizer->SetEnableSIMD(true);
         rasterizer->SetBackfaceCullingEnabled(true);
       }

@@ -92,9 +92,9 @@ void MultiThreadedSIMDRasterizer::Clear(uint32_t color)
 }
 
 //-----------------------------------------------------------------------------
-// RenderTrianglesInBatch
+// TransformTrianglesInBatch
 //-----------------------------------------------------------------------------
-void MultiThreadedSIMDRasterizer::RenderTrianglesInBatch(const glm::mat4& mvp)
+void MultiThreadedSIMDRasterizer::TransformTrianglesInBatch(const glm::mat4& mvp)
 {
   const int batchSize = 64;
   const int numBatches = ((int)_Triangles.size() + batchSize - 1) / batchSize;
@@ -414,7 +414,7 @@ void MultiThreadedSIMDRasterizer::RenderRotatingScene(float time)
 void MultiThreadedSIMDRasterizer::RenderTriangles(const glm::mat4& mvp)
 {
   // 1. Transformation des triangles
-  RenderTrianglesInBatch(mvp);
+  TransformTrianglesInBatch(mvp);
 
   // 2. Binning des triangles aux tuiles
   BinTrianglesToTiles();

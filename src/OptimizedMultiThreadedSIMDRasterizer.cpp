@@ -1,8 +1,7 @@
 #include "OptimizedMultiThreadedSIMDRasterizer.h"
 
-#if defined(SIMD_AVX2)
-
 #include <algorithm>
+#include <future>
 #include <iostream>
 #include <cmath>
 
@@ -14,7 +13,6 @@ OptimizedMultiThreadedSIMDRasterizer::OptimizedMultiThreadedSIMDRasterizer(int w
 {
   // Calcul du nombre de threads optimal
   _NumThreads = (numThreads <= 0) ? std::thread::hardware_concurrency() : numThreads;
-  //_NumThreads = std::min(_NumThreads, 16); // Limiter e 16 threads max
 
   // Configuration des tuiles
   _TileCountX = (_ScreenWidth + TILE_SIZE - 1) / TILE_SIZE;
@@ -116,8 +114,6 @@ void OptimizedMultiThreadedSIMDRasterizer::SetTriangles(const std::vector<Triang
 //-----------------------------------------------------------------------------
 void OptimizedMultiThreadedSIMDRasterizer::RenderRotatingScene(float time)
 {
-  Clear(0xADD8E6FF);
-
   // Matrices de transformation
   glm::mat4 model = glm::rotate(glm::mat4(1.0f), time, glm::vec3(0, 1, 0));
   glm::mat4 view = glm::lookAt(
@@ -129,7 +125,22 @@ void OptimizedMultiThreadedSIMDRasterizer::RenderRotatingScene(float time)
   glm::mat4 mvp = projection * view * model;
 
   // Pipeline de rendu optimise
-  TransformTrianglesVectorized(mvp);
+  if ( GetEnableSIMD() )
+  {
+#ifdef SIMD_AVX2
+    Clear8x(0xADD8E6FF); // Utilisation de la version AVX2 pour le clear
+    TransformTrianglesAVX2(mvp);
+#else
+    Clear(0xADD8E6FF);
+    TransformTriangles(mvp);
+#endif
+  }
+  else
+  {
+    Clear(0xADD8E6FF);
+    TransformTriangles(mvp);
+  }
+
   HierarchicalBinning();
   RenderTrianglesMultiThreaded();
 }
@@ -139,112 +150,119 @@ void OptimizedMultiThreadedSIMDRasterizer::RenderRotatingScene(float time)
 //-----------------------------------------------------------------------------
 void OptimizedMultiThreadedSIMDRasterizer::Clear(uint32_t color)
 {
-  // Clear vectorise
-  const __m256i clearColor = _mm256_set1_epi32(color);
-  const __m256 clearDepth = _mm256_set1_ps(G_INFINITY);
+  // Clear en parallele par chunks
+  const int chunkSize = 64000; // ~256KB chunks
+  int numChunks = ((int)_ColorBuffer.size() + chunkSize - 1) / chunkSize;
 
-  const size_t pixelCount = _ScreenWidth * _ScreenHeight;
-  const size_t simdPixels = (pixelCount / 8) * 8;
-
-  // Clear en parallele
-  for (int i = 0; i < simdPixels; i += 8)
+  std::vector<std::future<void>> futures;
+  for (int i = 0; i < numChunks; ++i)
   {
-    _mm256_store_si256((__m256i*) & _ColorBuffer[i], clearColor);
-    _mm256_store_ps(&_DepthBuffer[i], clearDepth);
+    int start = i * chunkSize;
+    int end = std::min(start + chunkSize, (int)_ColorBuffer.size());
+
+    futures.push_back(
+      std::async(
+        std::launch::async, [this, start, end, color]()
+        {
+          std::fill(_ColorBuffer.begin() + start, _ColorBuffer.begin() + end, color);
+          std::fill(_DepthBuffer.begin() + start, _DepthBuffer.begin() + end, G_INFINITY);
+        }
+      )
+    );
   }
 
-  // Clear des pixels restants
-  for (size_t i = simdPixels; i < pixelCount; ++i)
-  {
-    _ColorBuffer[i] = color;
-    _DepthBuffer[i] = G_INFINITY;
-  }
+  // Attendre la fin du Clear
+  for (auto& future : futures)
+    future.wait();
 }
 
 //-----------------------------------------------------------------------------
-// TransformTrianglesVectorized
+// TransformVertex
 //-----------------------------------------------------------------------------
-void OptimizedMultiThreadedSIMDRasterizer::TransformTrianglesVectorized(const glm::mat4& mvp)
+glm::vec4 OptimizedMultiThreadedSIMDRasterizer::TransformVertex(const glm::vec3& vertex, const glm::mat4& mvp)
 {
-  const size_t triangleCount = _Triangles.size();
-  _Transformed.resize(triangleCount);
+  glm::vec4 clipSpace = mvp * glm::vec4(vertex, 1.0f);
 
-  // Matrice transposee pour vectorisation optimale
-  alignas(32) float mvpTransposed[16];
-  for (int i = 0; i < 4; ++i)
+  // to NDC
+  if (clipSpace.w != 0.0f)
   {
-    for (int j = 0; j < 4; ++j)
-    {
-      mvpTransposed[i * 4 + j] = mvp[j][i];
-    }
+    clipSpace.x /= clipSpace.w;
+    clipSpace.y /= clipSpace.w;
+    clipSpace.z /= clipSpace.w;
   }
 
-  const __m256 mvpRow0 = _mm256_load_ps(&mvpTransposed[0]);
-  const __m256 mvpRow1 = _mm256_load_ps(&mvpTransposed[4]);
-  const __m256 mvpRow2 = _mm256_load_ps(&mvpTransposed[8]);
-  const __m256 mvpRow3 = _mm256_load_ps(&mvpTransposed[12]);
+  // To screen space
+  float x = (clipSpace.x + 1.0f) * 0.5f * _ScreenWidth;
+  float y = (1.0f - clipSpace.y) * 0.5f * _ScreenHeight;
+  //float z = clipSpace.z;
+  float z = (clipSpace.z + 1.0f) * 0.5f; // Map z to [0,1]
 
-  // Transformation en parallele
-  for (int triIndex = 0; triIndex < triangleCount; ++triIndex)
-  {
-    const Triangle& tri = _Triangles[triIndex];
-    TransformedTriangle& transformedTri = _Transformed[triIndex];
-
-    // Transformer les 3 vertices du triangle
-    for (int v = 0; v < 3; ++v)
-    {
-      glm::vec4 clipSpace = TransformVertexSIMD(tri.vertices[v], mvpRow0, mvpRow1, mvpRow2, mvpRow3);
-
-      // Conversion vers coordonnees ecran
-      if (clipSpace.w > 0.0f)
-      {
-        float invW = 1.0f / clipSpace.w;
-        transformedTri.screenVertices[v] = glm::vec4(
-          (clipSpace.x * invW + 1.0f) * 0.5f * _ScreenWidth,
-          (1.0f - clipSpace.y * invW) * 0.5f * _ScreenHeight,
-          clipSpace.z * invW,  // Pour Z-buffer
-          clipSpace.w          // Profondeur originale pour interpolation
-        );
-        transformedTri.valid = true;
-      }
-      else
-      {
-        transformedTri.valid = false;
-        continue;
-      }
-    }
-
-    transformedTri.color = tri.color;
-
-    if (transformedTri.valid)
-    {
-      SetupTriangleDataOptimized(transformedTri);
-    }
-  }
+  return glm::vec4(x, y, z, clipSpace.w);
 }
 
 //-----------------------------------------------------------------------------
-// TransformVertexSIMD
+// TransformTriangles
 //-----------------------------------------------------------------------------
-glm::vec4 OptimizedMultiThreadedSIMDRasterizer::TransformVertexSIMD(const glm::vec3& vertex, const __m256& mvpRow0, const __m256& mvpRow1, const __m256& mvpRow2, const __m256& mvpRow3)
+void OptimizedMultiThreadedSIMDRasterizer::TransformTriangles(const glm::mat4& mvp)
 {
-  // Vectorisation de la multiplication matrice-vecteur
-  const __m256 pos = _mm256_set_ps(0, 0, 0, 0, 1.0f, vertex.z, vertex.y, vertex.x);
+  const int batchSize = 64;
+  const int numBatches = ((int)_Triangles.size() + batchSize - 1) / batchSize;
 
-  __m256 result0 = _mm256_mul_ps(pos, mvpRow0);
-  __m256 result1 = _mm256_mul_ps(pos, mvpRow1);
-  __m256 result2 = _mm256_mul_ps(pos, mvpRow2);
-  __m256 result3 = _mm256_mul_ps(pos, mvpRow3);
+  // Creation des futures pour chaque batch
+  std::vector<std::future<void>> futures;
+  futures.reserve(numBatches);
 
-  // Reduction horizontale
-  result0 = _mm256_hadd_ps(result0, result1);
-  result2 = _mm256_hadd_ps(result2, result3);
-  result0 = _mm256_hadd_ps(result0, result2);
+  for (size_t batchStart = 0; batchStart < _Triangles.size(); batchStart += batchSize)
+  {
+    futures.push_back(std::async(std::launch::async, [this, batchStart, batchSize, &mvp]()
+      {
+        size_t end = std::min(batchStart + batchSize, _Triangles.size());
 
-  alignas(32) float results[8];
-  _mm256_store_ps(results, result0);
+        for (size_t j = batchStart; j < end; ++j)
+        {
+          TransformedTriangle& tri = _Transformed[j];
+          tri.color = _Triangles[j].color;
+          tri.valid = false;
 
-  return glm::vec4(results[0] + results[4], results[1] + results[5], results[2] + results[6], results[3] + results[7]);
+          // Transformation des vertices
+          for (int v = 0; v < 3; ++v)
+            tri.screenVertices[v] = TransformVertex(_Triangles[j].vertices[v], mvp);
+
+          // Backface culling
+          glm::vec2 edge1 = glm::vec2(tri.screenVertices[1].x - tri.screenVertices[0].x, tri.screenVertices[1].y - tri.screenVertices[0].y);
+          glm::vec2 edge2 = glm::vec2(tri.screenVertices[2].x - tri.screenVertices[0].x, tri.screenVertices[2].y - tri.screenVertices[0].y);
+
+          float crossProduct = edge1.x * edge2.y - edge1.y * edge2.x;
+
+          if (_EnableBackfaceCulling && crossProduct <= 0)
+            continue;
+
+          tri.area = crossProduct * 0.5f;
+
+          // Setup edge functions
+          SetupTriangleData(tri);
+
+          // Frustum culling basique
+          bool inScreen = false;
+          for (int v = 0; v < 3; ++v)
+          {
+            if ((tri.screenVertices[v].x >= 0 && tri.screenVertices[v].x < _ScreenWidth)
+              && (tri.screenVertices[v].y >= 0 && tri.screenVertices[v].y < _ScreenHeight))
+            {
+              inScreen = true;
+              break;
+            }
+          }
+
+          if (inScreen)
+            tri.valid = true;
+        }
+      }
+    ));
+  }
+
+  for (auto& future : futures)
+    future.wait();
 }
 
 //-----------------------------------------------------------------------------
@@ -344,11 +362,24 @@ void OptimizedMultiThreadedSIMDRasterizer::WorkerThreadFunctionOptimized(int thr
 
     // Work stealing
     int tileIndex;
-    while ((tileIndex = _WorkStealingIndexAtomic.fetch_add(1)) < _OptimizedTiles.size()) {
+    while ((tileIndex = _WorkStealingIndexAtomic.fetch_add(1)) < _OptimizedTiles.size())
+    {
       const TileData& tileData = _OptimizedTiles[tileIndex];
 
-      if (tileData._NeedsProcessingAtomic && tileData._TriangleCountAtomic >= MIN_TRIANGLES_PER_TILE) {
-        RenderTileAVX2(tileData._Tile, localData);
+      if (tileData._NeedsProcessingAtomic && tileData._TriangleCountAtomic >= MIN_TRIANGLES_PER_TILE)
+      {
+        if ( GetEnableSIMD() )
+        {
+#if defined(SIMD_AVX2)
+          RenderTileAVX2(tileData._Tile, localData);
+#else
+          RenderTile(tileData._Tile, localData); // Fallback scalaire
+#endif
+        }
+        else
+        {
+          RenderTile(tileData._Tile, localData);
+        }
       }
     }
 
@@ -380,217 +411,6 @@ bool OptimizedMultiThreadedSIMDRasterizer::StealWork(int threadId, int& outTileI
     }
   }
   return false;
-}
-
-//-----------------------------------------------------------------------------
-// RenderTileAVX2
-//-----------------------------------------------------------------------------
-void OptimizedMultiThreadedSIMDRasterizer::RenderTileAVX2(const Tile& tile, ThreadLocalData* localData)
-{
-  const int tileIndex = (tile.y / TILE_SIZE) * _TileCountX + (tile.x / TILE_SIZE);
-  const TileData& tileData = _OptimizedTiles[tileIndex];
-
-  // Clear du tile local
-  const __m256i clearColor = _mm256_set1_epi32(0xADD8E6FF);
-  const __m256 clearDepth = _mm256_set1_ps(G_INFINITY);
-
-  const int tilePixels = tile.width * tile.height;
-  for (int i = 0; i < tilePixels; i += 8)
-  {
-    if (i + 8 <= tilePixels)
-    {
-      _mm256_store_si256((__m256i*) & localData->_ColorBuffer[i], clearColor);
-      _mm256_store_ps(&localData->_DepthBuffer[i], clearDepth);
-    }
-  }
-
-  // Rendu de tous les triangles du tile
-  for (const TransformedTriangle* tri : tileData._Triangles)
-  {
-    RenderTriangleInTile16x(*tri, tile, localData);
-  }
-
-  // Copie du tile local vers le buffer principal
-  CopyTileToMainBuffer(tile, localData);
-}
-
-//-----------------------------------------------------------------------------
-// RenderTriangleInTile16x
-//-----------------------------------------------------------------------------
-void OptimizedMultiThreadedSIMDRasterizer::RenderTriangleInTile16x(const TransformedTriangle& tri, const Tile& tile, ThreadLocalData* localData)
-{
-  const int startX = tile.x;
-  const int startY = tile.y;
-  const int endX = startX + tile.width;
-  const int endY = startY + tile.height;
-
-  // Process par blocs 4x4
-  for (int blockY = startY; blockY < endY; blockY += 4)
-  {
-    for (int blockX = startX; blockX < endX; blockX += 8)
-    {
-
-      // Test de visibilite rapide du bloc
-      if (!TestBlockVisibility(blockX, blockY, 8, 4, tri))
-        continue;
-
-      // Process chaque ligne du bloc 4x4
-      for (int y = blockY; y < std::min(blockY + 4, endY); ++y)
-      {
-        const int maxX = std::min(blockX + 8, endX);
-
-        for (int x = blockX; x < maxX; x += 8)
-        {
-          // Test de 8 pixels simultanes
-          __m256i mask = TestPixels8xOptimized((float)x, (float)y, tri);
-
-          if (!_mm256_testz_si256(mask, mask))
-          {
-            // Calcul des profondeurs pour les 8 pixels
-            alignas(32) float depths[8];
-            InterpolateDepth8x_InverseZ((float)x, (float)y, tri, depths);
-
-            // Mise e jour du buffer local
-            UpdateLocalBuffer8x(x - startX, y - startY, tile.width, depths, mask, tri.color, localData);
-          }
-        }
-      }
-    }
-  }
-}
-
-//-----------------------------------------------------------------------------
-// TestPixels8xOptimized
-//-----------------------------------------------------------------------------
-__m256i OptimizedMultiThreadedSIMDRasterizer::TestPixels8xOptimized(float startX, float y, const TransformedTriangle& tri)
-{
-  // Coordonnees des 8 pixels avec offset 0.5 pour le centre du pixel
-  const __m256 pixelX = _mm256_set_ps(startX + 7.5f, startX + 6.5f, startX + 5.5f, startX + 4.5f,
-    startX + 3.5f, startX + 2.5f, startX + 1.5f, startX + 0.5f);
-  const __m256 pixelY = _mm256_set1_ps(y + 0.5f);
-
-  // Chargement des coefficients d'edge function
-  const __m256 edgeA0 = _mm256_broadcast_ss(&tri.edgeA[0]);
-  const __m256 edgeB0 = _mm256_broadcast_ss(&tri.edgeB[0]);
-  const __m256 edgeC0 = _mm256_broadcast_ss(&tri.edgeC[0]);
-
-  const __m256 edgeA1 = _mm256_broadcast_ss(&tri.edgeA[1]);
-  const __m256 edgeB1 = _mm256_broadcast_ss(&tri.edgeB[1]);
-  const __m256 edgeC1 = _mm256_broadcast_ss(&tri.edgeC[1]);
-
-  const __m256 edgeA2 = _mm256_broadcast_ss(&tri.edgeA[2]);
-  const __m256 edgeB2 = _mm256_broadcast_ss(&tri.edgeB[2]);
-  const __m256 edgeC2 = _mm256_broadcast_ss(&tri.edgeC[2]);
-
-  // Calcul des 3 edge functions avec FMA
-  __m256 edge0 = _mm256_fmadd_ps(pixelX, edgeA0, _mm256_fmadd_ps(pixelY, edgeB0, edgeC0));
-  __m256 edge1 = _mm256_fmadd_ps(pixelX, edgeA1, _mm256_fmadd_ps(pixelY, edgeB1, edgeC1));
-  __m256 edge2 = _mm256_fmadd_ps(pixelX, edgeA2, _mm256_fmadd_ps(pixelY, edgeB2, edgeC2));
-
-  // Test de signes (>= 0 pour etre e l'interieur)
-  const __m256 zero = _mm256_setzero_ps();
-  __m256i mask0 = _mm256_castps_si256(_mm256_cmp_ps(edge0, zero, _CMP_GE_OQ));
-  __m256i mask1 = _mm256_castps_si256(_mm256_cmp_ps(edge1, zero, _CMP_GE_OQ));
-  __m256i mask2 = _mm256_castps_si256(_mm256_cmp_ps(edge2, zero, _CMP_GE_OQ));
-
-  // Combinaison des masques
-  return _mm256_and_si256(_mm256_and_si256(mask0, mask1), mask2);
-}
-
-//-----------------------------------------------------------------------------
-// InterpolateDepth8x_InverseZ
-//-----------------------------------------------------------------------------
-void OptimizedMultiThreadedSIMDRasterizer::InterpolateDepth8x_InverseZ(float startX, float y,
-  const TransformedTriangle& tri, float* output)
-{
-  const __m256 pixelX = _mm256_set_ps(startX + 7.5f, startX + 6.5f, startX + 5.5f, startX + 4.5f,
-    startX + 3.5f, startX + 2.5f, startX + 1.5f, startX + 0.5f);
-  const __m256 pixelY = _mm256_set1_ps(y + 0.5f);
-
-  // Calcul des coordonnees barycentriques
-  const __m256 edgeA0 = _mm256_broadcast_ss(&tri.edgeA[0]);
-  const __m256 edgeB0 = _mm256_broadcast_ss(&tri.edgeB[0]);
-  const __m256 edgeC0 = _mm256_broadcast_ss(&tri.edgeC[0]);
-
-  const __m256 edgeA1 = _mm256_broadcast_ss(&tri.edgeA[1]);
-  const __m256 edgeB1 = _mm256_broadcast_ss(&tri.edgeB[1]);
-  const __m256 edgeC1 = _mm256_broadcast_ss(&tri.edgeC[1]);
-
-  const __m256 edgeA2 = _mm256_broadcast_ss(&tri.edgeA[2]);
-  const __m256 edgeB2 = _mm256_broadcast_ss(&tri.edgeB[2]);
-  const __m256 edgeC2 = _mm256_broadcast_ss(&tri.edgeC[2]);
-
-  __m256 u = _mm256_fmadd_ps(pixelX, edgeA0, _mm256_fmadd_ps(pixelY, edgeB0, edgeC0));
-  __m256 v = _mm256_fmadd_ps(pixelX, edgeA1, _mm256_fmadd_ps(pixelY, edgeB1, edgeC1));
-  __m256 w = _mm256_fmadd_ps(pixelX, edgeA2, _mm256_fmadd_ps(pixelY, edgeB2, edgeC2));
-
-  // Interpolation des profondeurs Z
-  const __m256 z0 = _mm256_broadcast_ss(&tri.screenVertices[0].z);
-  const __m256 z1 = _mm256_broadcast_ss(&tri.screenVertices[1].z);
-  const __m256 z2 = _mm256_broadcast_ss(&tri.screenVertices[2].z);
-
-  __m256 interpolatedZ = _mm256_fmadd_ps(u, z0, _mm256_fmadd_ps(v, z1, _mm256_mul_ps(w, z2)));
-
-  _mm256_store_ps(output, interpolatedZ);
-}
-
-//-----------------------------------------------------------------------------
-// UpdateLocalBuffer8x
-//-----------------------------------------------------------------------------
-void OptimizedMultiThreadedSIMDRasterizer::UpdateLocalBuffer8x(int localX, int localY, int tileWidth,
-  const float* depths, const __m256i& mask, uint32_t color, ThreadLocalData* localData)
-{
-  const int baseIndex = localY * tileWidth + localX;
-
-  // Chargement des profondeurs actuelles
-  __m256 currentDepths = _mm256_loadu_ps(&localData->_DepthBuffer[baseIndex]);
-  __m256 newDepths = _mm256_load_ps(depths);
-
-  // Test de profondeur
-  __m256 depthMask = _mm256_cmp_ps(newDepths, currentDepths, _CMP_LT_OQ);
-  __m256i finalMask = _mm256_and_si256(mask, _mm256_castps_si256(depthMask));
-
-  // Mise e jour conditionnelle des profondeurs
-  __m256 updatedDepths = _mm256_blendv_ps(currentDepths, newDepths, _mm256_castsi256_ps(finalMask));
-  _mm256_storeu_ps(&localData->_DepthBuffer[baseIndex], updatedDepths);
-
-  // Mise e jour des couleurs
-  __m256i colorVec = _mm256_set1_epi32(color);
-  __m256i currentColors = _mm256_loadu_si256((__m256i*) & localData->_ColorBuffer[baseIndex]);
-  __m256i updatedColors = _mm256_blendv_epi8(currentColors, colorVec, finalMask);
-  _mm256_storeu_si256((__m256i*) & localData->_ColorBuffer[baseIndex], updatedColors);
-}
-
-//-----------------------------------------------------------------------------
-// CopyTileToMainBuffer
-//-----------------------------------------------------------------------------
-void OptimizedMultiThreadedSIMDRasterizer::CopyTileToMainBuffer(const Tile& tile, ThreadLocalData* localData)
-{
-  // Copie optimisee du tile local vers le buffer principal
-  for (int y = 0; y < tile.height; ++y)
-  {
-    const int globalY = tile.y + y;
-    const int localRowStart = y * tile.width;
-    const int globalRowStart = globalY * _ScreenWidth + tile.x;
-
-    // Copie vectorisee par chunks de 8 pixels
-    int x = 0;
-    for (; x + 8 <= tile.width; x += 8)
-    {
-      __m256i colors = _mm256_load_si256((__m256i*) & localData->_ColorBuffer[localRowStart + x]);
-      __m256 depths = _mm256_load_ps(&localData->_DepthBuffer[localRowStart + x]);
-
-      _mm256_storeu_si256((__m256i*) & _ColorBuffer[globalRowStart + x], colors);
-      _mm256_storeu_ps(&_DepthBuffer[globalRowStart + x], depths);
-    }
-
-    // Copie des pixels restants
-    for (; x < tile.width; ++x)
-    {
-      _ColorBuffer[globalRowStart + x] = localData->_ColorBuffer[localRowStart + x];
-      _DepthBuffer[globalRowStart + x] = localData->_DepthBuffer[localRowStart + x];
-    }
-  }
 }
 
 //-----------------------------------------------------------------------------
@@ -634,9 +454,9 @@ bool OptimizedMultiThreadedSIMDRasterizer::TestPixels1x(float x, float y, const 
 }
 
 //-----------------------------------------------------------------------------
-// SetupTriangleDataOptimized
+// SetupTriangleData
 //-----------------------------------------------------------------------------
-void OptimizedMultiThreadedSIMDRasterizer::SetupTriangleDataOptimized(TransformedTriangle& tri)
+void OptimizedMultiThreadedSIMDRasterizer::SetupTriangleData(TransformedTriangle& tri)
 {
   const glm::vec4& v0 = tri.screenVertices[0];
   const glm::vec4& v1 = tri.screenVertices[1];
@@ -689,6 +509,389 @@ void OptimizedMultiThreadedSIMDRasterizer::SetupTriangleDataOptimized(Transforme
 }
 
 //-----------------------------------------------------------------------------
+// InterpolateDepth1x
+//-----------------------------------------------------------------------------
+float OptimizedMultiThreadedSIMDRasterizer::InterpolateDepth1x(float x, float y, const TransformedTriangle& tri)
+{
+  // Calcul des coordonnees barycentriques
+  const float u = tri.edgeA[0] * x + tri.edgeB[0] * y + tri.edgeC[0];
+  const float v = tri.edgeA[1] * x + tri.edgeB[1] * y + tri.edgeC[1];
+  const float w = tri.edgeA[2] * x + tri.edgeB[2] * y + tri.edgeC[2];
+
+  // Interpolation lineaire de la profondeur Z (pour le Z-buffer)
+  return u * tri.screenVertices[0].z +
+    v * tri.screenVertices[1].z +
+    w * tri.screenVertices[2].z;
+}
+
+//-----------------------------------------------------------------------------
+// RenderTile
+//-----------------------------------------------------------------------------
+void OptimizedMultiThreadedSIMDRasterizer::RenderTile(const Tile& tile, ThreadLocalData* localData)
+{
+  const int tileIndex = (tile.y / TILE_SIZE) * _TileCountX + (tile.x / TILE_SIZE);
+  const TileData& tileData = _OptimizedTiles[tileIndex];
+
+  // Clear du tile local
+  const __m256i clearColor = _mm256_set1_epi32(0xADD8E6FF);
+  const __m256 clearDepth = _mm256_set1_ps(G_INFINITY);
+
+  std::fill(_ColorBuffer.begin(), _ColorBuffer.end(), 0xADD8E6FF);
+  std::fill(_DepthBuffer.begin(), _DepthBuffer.end(), G_INFINITY);
+
+
+  // Rendu de tous les triangles du tile
+  for (const TransformedTriangle* tri : tileData._Triangles)
+    RenderTriangleInTile(*tri, tile, localData);
+
+  // Copie du tile local vers le buffer principal
+  CopyTileToMainBuffer(tile, localData);
+}
+
+//-----------------------------------------------------------------------------
+// CopyTileToMainBuffer
+//-----------------------------------------------------------------------------
+void OptimizedMultiThreadedSIMDRasterizer::CopyTileToMainBuffer(const Tile& tile, ThreadLocalData* localData)
+{
+  for (int y = 0; y < tile.height; ++y)
+  {
+    const int globalY = tile.y + y;
+    const int localRowStart = y * tile.width;
+    const int globalRowStart = globalY * _ScreenWidth + tile.x;
+
+    memcpy(
+      &_ColorBuffer[globalRowStart],
+      &localData->_ColorBuffer[localRowStart],
+      tile.width * sizeof(uint32_t)
+    );
+  }
+}
+
+//-----------------------------------------------------------------------------
+// RenderTriangleInTile
+//-----------------------------------------------------------------------------
+void OptimizedMultiThreadedSIMDRasterizer::RenderTriangleInTile(const TransformedTriangle& tri, const Tile& tile, ThreadLocalData* localData)
+{
+  // Bounding box du triangle dans la tuile
+  float minX = std::min({ tri.screenVertices[0].x, tri.screenVertices[1].x, tri.screenVertices[2].x });
+  float maxX = std::max({ tri.screenVertices[0].x, tri.screenVertices[1].x, tri.screenVertices[2].x });
+  float minY = std::min({ tri.screenVertices[0].y, tri.screenVertices[1].y, tri.screenVertices[2].y });
+  float maxY = std::max({ tri.screenVertices[0].y, tri.screenVertices[1].y, tri.screenVertices[2].y });
+
+  // Intersection avec la tuile
+  int startX = std::max(tile.x, (int)std::floor(minX));
+  int endX   = std::min(tile.x + tile.width - 1, (int)std::ceil(maxX));
+  int startY = std::max(tile.y, (int)std::floor(minY));
+  int endY   = std::min(tile.y + tile.height - 1, (int)std::ceil(maxY));
+
+  // Rasterization par blocs de pixels
+  for (int y = startY; y <= endY; ++y)
+  {
+    for (int x = startX; x <= endX; ++x)
+    {
+      if ( TestPixels1x(x + 0.5f, y + 0.5f, tri) )
+      {
+        // Interpolation des profondeurs
+        float interpolated_depth = InterpolateDepth1x(x + 0.5f, y + 0.5f, tri);
+
+        // Z-test et ecriture des pixels
+        int localX = x - tile.x;
+        int localY = y - tile.y;
+        int localPixelIndex = localY * tile.width + localX;
+        if ( interpolated_depth < localData->_DepthBuffer[localPixelIndex] )
+        {
+          localData -> _DepthBuffer[localPixelIndex] = interpolated_depth;
+          localData -> _ColorBuffer[localPixelIndex] = tri.color;
+        }
+      }
+    }
+  }
+}
+
+#ifdef SIMD_AVX2
+//-----------------------------------------------------------------------------
+// TransformTrianglesAVX2
+//-----------------------------------------------------------------------------
+void OptimizedMultiThreadedSIMDRasterizer::TransformTrianglesAVX2(const glm::mat4& mvp)
+{
+  const size_t triangleCount = _Triangles.size();
+  _Transformed.resize(triangleCount);
+
+  // Matrice transposee pour vectorisation optimale
+  alignas(32) float mvpTransposed[16];
+  for (int i = 0; i < 4; ++i)
+  {
+    for (int j = 0; j < 4; ++j)
+    {
+      mvpTransposed[i * 4 + j] = mvp[j][i];
+    }
+  }
+
+  const __m256 mvpRow0 = _mm256_load_ps(&mvpTransposed[0]);
+  const __m256 mvpRow1 = _mm256_load_ps(&mvpTransposed[4]);
+  const __m256 mvpRow2 = _mm256_load_ps(&mvpTransposed[8]);
+  const __m256 mvpRow3 = _mm256_load_ps(&mvpTransposed[12]);
+
+  // Transformation en parallele
+  for (int triIndex = 0; triIndex < triangleCount; ++triIndex)
+  {
+    const Triangle& tri = _Triangles[triIndex];
+    TransformedTriangle& transformedTri = _Transformed[triIndex];
+
+    // Transformer les 3 vertices du triangle
+    for (int v = 0; v < 3; ++v)
+    {
+      glm::vec4 clipSpace = TransformVertexAVX2(tri.vertices[v], mvpRow0, mvpRow1, mvpRow2, mvpRow3);
+
+      // Conversion vers coordonnees ecran
+      if (clipSpace.w > 0.0f)
+      {
+        float invW = 1.0f / clipSpace.w;
+        transformedTri.screenVertices[v] = glm::vec4(
+          (clipSpace.x * invW + 1.0f) * 0.5f * _ScreenWidth,
+          (1.0f - clipSpace.y * invW) * 0.5f * _ScreenHeight,
+          clipSpace.z * invW,  // Pour Z-buffer
+          clipSpace.w          // Profondeur originale pour interpolation
+        );
+        transformedTri.valid = true;
+      }
+      else
+      {
+        transformedTri.valid = false;
+        continue;
+      }
+    }
+
+    transformedTri.color = tri.color;
+
+    if (transformedTri.valid)
+    {
+      SetupTriangleData(transformedTri);
+    }
+  }
+}
+#endif // SIMD_AVX2
+
+#ifdef SIMD_AVX2
+//-----------------------------------------------------------------------------
+// Clear8x
+//-----------------------------------------------------------------------------
+void OptimizedMultiThreadedSIMDRasterizer::Clear8x(uint32_t color)
+{
+  // Clear vectorise
+  const __m256i clearColor = _mm256_set1_epi32(color);
+  const __m256 clearDepth = _mm256_set1_ps(G_INFINITY);
+
+  const size_t pixelCount = _ScreenWidth * _ScreenHeight;
+  const size_t simdPixels = (pixelCount / 8) * 8;
+
+  // Clear en parallele
+  for (int i = 0; i < simdPixels; i += 8)
+  {
+    _mm256_store_si256((__m256i*) & _ColorBuffer[i], clearColor);
+    _mm256_store_ps(&_DepthBuffer[i], clearDepth);
+  }
+
+  // Clear des pixels restants
+  for (size_t i = simdPixels; i < pixelCount; ++i)
+  {
+    _ColorBuffer[i] = color;
+    _DepthBuffer[i] = G_INFINITY;
+  }
+}
+#endif // SIMD_AVX2
+
+#ifdef SIMD_AVX2
+//-----------------------------------------------------------------------------
+// RenderTileAVX2
+//-----------------------------------------------------------------------------
+void OptimizedMultiThreadedSIMDRasterizer::RenderTileAVX2(const Tile& tile, ThreadLocalData* localData)
+{
+  const int tileIndex = (tile.y / TILE_SIZE) * _TileCountX + (tile.x / TILE_SIZE);
+  const TileData& tileData = _OptimizedTiles[tileIndex];
+
+  // Clear du tile local
+  const __m256i clearColor = _mm256_set1_epi32(0xADD8E6FF);
+  const __m256 clearDepth = _mm256_set1_ps(G_INFINITY);
+
+  const int tilePixels = tile.width * tile.height;
+  for (int i = 0; i < tilePixels; i += 8)
+  {
+    if (i + 8 <= tilePixels)
+    {
+      _mm256_store_si256((__m256i*) & localData->_ColorBuffer[i], clearColor);
+      _mm256_store_ps(&localData->_DepthBuffer[i], clearDepth);
+    }
+  }
+
+  // Rendu de tous les triangles du tile
+  for (const TransformedTriangle* tri : tileData._Triangles)
+  {
+    RenderTriangleInTile16x(*tri, tile, localData);
+  }
+
+  // Copie du tile local vers le buffer principal
+  CopyTileToMainBuffer8x(tile, localData);
+}
+#endif // SIMD_AVX2
+
+#ifdef SIMD_AVX2
+//-----------------------------------------------------------------------------
+// RenderTriangleInTile16x
+//-----------------------------------------------------------------------------
+void OptimizedMultiThreadedSIMDRasterizer::RenderTriangleInTile16x(const TransformedTriangle& tri, const Tile& tile, ThreadLocalData* localData)
+{
+  const int startX = tile.x;
+  const int startY = tile.y;
+  const int endX = startX + tile.width;
+  const int endY = startY + tile.height;
+
+  // Process par blocs 4x4
+  for (int blockY = startY; blockY < endY; blockY += 4)
+  {
+    for (int blockX = startX; blockX < endX; blockX += 8)
+    {
+
+      // Test de visibilite rapide du bloc
+      if (!TestBlockVisibility(blockX, blockY, 8, 4, tri))
+        continue;
+
+      // Process chaque ligne du bloc 4x4
+      for (int y = blockY; y < std::min(blockY + 4, endY); ++y)
+      {
+        const int maxX = std::min(blockX + 8, endX);
+
+        for (int x = blockX; x < maxX; x += 8)
+        {
+          // Test de 8 pixels simultanes
+          __m256i mask = TestPixels8x((float)x, (float)y, tri);
+
+          if (!_mm256_testz_si256(mask, mask))
+          {
+            // Calcul des profondeurs pour les 8 pixels
+            alignas(32) float depths[8];
+            InterpolateDepth8x((float)x, (float)y, tri, depths);
+
+            // Mise e jour du buffer local
+            UpdateLocalBuffer8x(x - startX, y - startY, tile.width, depths, mask, tri.color, localData);
+          }
+        }
+      }
+    }
+  }
+}
+#endif // SIMD_AVX2
+
+#ifdef SIMD_AVX2
+//-----------------------------------------------------------------------------
+// TestPixels8x
+//-----------------------------------------------------------------------------
+__m256i OptimizedMultiThreadedSIMDRasterizer::TestPixels8x(float startX, float y, const TransformedTriangle& tri)
+{
+  // Coordonnees des 8 pixels avec offset 0.5 pour le centre du pixel
+  const __m256 pixelX = _mm256_set_ps(startX + 7.5f, startX + 6.5f, startX + 5.5f, startX + 4.5f,
+    startX + 3.5f, startX + 2.5f, startX + 1.5f, startX + 0.5f);
+  const __m256 pixelY = _mm256_set1_ps(y + 0.5f);
+
+  // Chargement des coefficients d'edge function
+  const __m256 edgeA0 = _mm256_broadcast_ss(&tri.edgeA[0]);
+  const __m256 edgeB0 = _mm256_broadcast_ss(&tri.edgeB[0]);
+  const __m256 edgeC0 = _mm256_broadcast_ss(&tri.edgeC[0]);
+
+  const __m256 edgeA1 = _mm256_broadcast_ss(&tri.edgeA[1]);
+  const __m256 edgeB1 = _mm256_broadcast_ss(&tri.edgeB[1]);
+  const __m256 edgeC1 = _mm256_broadcast_ss(&tri.edgeC[1]);
+
+  const __m256 edgeA2 = _mm256_broadcast_ss(&tri.edgeA[2]);
+  const __m256 edgeB2 = _mm256_broadcast_ss(&tri.edgeB[2]);
+  const __m256 edgeC2 = _mm256_broadcast_ss(&tri.edgeC[2]);
+
+  // Calcul des 3 edge functions avec FMA
+  __m256 edge0 = _mm256_fmadd_ps(pixelX, edgeA0, _mm256_fmadd_ps(pixelY, edgeB0, edgeC0));
+  __m256 edge1 = _mm256_fmadd_ps(pixelX, edgeA1, _mm256_fmadd_ps(pixelY, edgeB1, edgeC1));
+  __m256 edge2 = _mm256_fmadd_ps(pixelX, edgeA2, _mm256_fmadd_ps(pixelY, edgeB2, edgeC2));
+
+  // Test de signes (>= 0 pour etre e l'interieur)
+  const __m256 zero = _mm256_setzero_ps();
+  __m256i mask0 = _mm256_castps_si256(_mm256_cmp_ps(edge0, zero, _CMP_GE_OQ));
+  __m256i mask1 = _mm256_castps_si256(_mm256_cmp_ps(edge1, zero, _CMP_GE_OQ));
+  __m256i mask2 = _mm256_castps_si256(_mm256_cmp_ps(edge2, zero, _CMP_GE_OQ));
+
+  // Combinaison des masques
+  return _mm256_and_si256(_mm256_and_si256(mask0, mask1), mask2);
+}
+#endif // SIMD_AVX2
+
+#ifdef SIMD_AVX2
+//-----------------------------------------------------------------------------
+// InterpolateDepth8x
+//-----------------------------------------------------------------------------
+void OptimizedMultiThreadedSIMDRasterizer::InterpolateDepth8x(float startX, float y,
+  const TransformedTriangle& tri, float* output)
+{
+  const __m256 pixelX = _mm256_set_ps(startX + 7.5f, startX + 6.5f, startX + 5.5f, startX + 4.5f,
+    startX + 3.5f, startX + 2.5f, startX + 1.5f, startX + 0.5f);
+  const __m256 pixelY = _mm256_set1_ps(y + 0.5f);
+
+  // Calcul des coordonnees barycentriques
+  const __m256 edgeA0 = _mm256_broadcast_ss(&tri.edgeA[0]);
+  const __m256 edgeB0 = _mm256_broadcast_ss(&tri.edgeB[0]);
+  const __m256 edgeC0 = _mm256_broadcast_ss(&tri.edgeC[0]);
+
+  const __m256 edgeA1 = _mm256_broadcast_ss(&tri.edgeA[1]);
+  const __m256 edgeB1 = _mm256_broadcast_ss(&tri.edgeB[1]);
+  const __m256 edgeC1 = _mm256_broadcast_ss(&tri.edgeC[1]);
+
+  const __m256 edgeA2 = _mm256_broadcast_ss(&tri.edgeA[2]);
+  const __m256 edgeB2 = _mm256_broadcast_ss(&tri.edgeB[2]);
+  const __m256 edgeC2 = _mm256_broadcast_ss(&tri.edgeC[2]);
+
+  __m256 u = _mm256_fmadd_ps(pixelX, edgeA0, _mm256_fmadd_ps(pixelY, edgeB0, edgeC0));
+  __m256 v = _mm256_fmadd_ps(pixelX, edgeA1, _mm256_fmadd_ps(pixelY, edgeB1, edgeC1));
+  __m256 w = _mm256_fmadd_ps(pixelX, edgeA2, _mm256_fmadd_ps(pixelY, edgeB2, edgeC2));
+
+  // Interpolation des profondeurs Z
+  const __m256 z0 = _mm256_broadcast_ss(&tri.screenVertices[0].z);
+  const __m256 z1 = _mm256_broadcast_ss(&tri.screenVertices[1].z);
+  const __m256 z2 = _mm256_broadcast_ss(&tri.screenVertices[2].z);
+
+  __m256 interpolatedZ = _mm256_fmadd_ps(u, z0, _mm256_fmadd_ps(v, z1, _mm256_mul_ps(w, z2)));
+
+  _mm256_store_ps(output, interpolatedZ);
+}
+#endif // SIMD_AVX2
+
+#ifdef SIMD_AVX2
+//-----------------------------------------------------------------------------
+// UpdateLocalBuffer8x
+//-----------------------------------------------------------------------------
+void OptimizedMultiThreadedSIMDRasterizer::UpdateLocalBuffer8x(int localX, int localY, int tileWidth,
+  const float* depths, const __m256i& mask, uint32_t color, ThreadLocalData* localData)
+{
+  const int baseIndex = localY * tileWidth + localX;
+
+  // Chargement des profondeurs actuelles
+  __m256 currentDepths = _mm256_loadu_ps(&localData->_DepthBuffer[baseIndex]);
+  __m256 newDepths = _mm256_load_ps(depths);
+
+  // Test de profondeur
+  __m256 depthMask = _mm256_cmp_ps(newDepths, currentDepths, _CMP_LT_OQ);
+  __m256i finalMask = _mm256_and_si256(mask, _mm256_castps_si256(depthMask));
+
+  // Mise e jour conditionnelle des profondeurs
+  __m256 updatedDepths = _mm256_blendv_ps(currentDepths, newDepths, _mm256_castsi256_ps(finalMask));
+  _mm256_storeu_ps(&localData->_DepthBuffer[baseIndex], updatedDepths);
+
+  // Mise e jour des couleurs
+  __m256i colorVec = _mm256_set1_epi32(color);
+  __m256i currentColors = _mm256_loadu_si256((__m256i*) & localData->_ColorBuffer[baseIndex]);
+  __m256i updatedColors = _mm256_blendv_epi8(currentColors, colorVec, finalMask);
+  _mm256_storeu_si256((__m256i*) & localData->_ColorBuffer[baseIndex], updatedColors);
+}
+#endif // SIMD_AVX2
+
+#ifdef SIMD_AVX2
+//-----------------------------------------------------------------------------
 // RenderTriangleInTile8x
 // Versions alternatives pour comparaison de performance
 //-----------------------------------------------------------------------------
@@ -707,11 +910,11 @@ void OptimizedMultiThreadedSIMDRasterizer::RenderTriangleInTile8x(const Transfor
 
       if (pixelCount == 8) {
         // Traitement SIMD complet de 8 pixels
-        __m256i mask = TestPixels8xOptimized((float)x, (float)y, tri);
+        __m256i mask = TestPixels8x((float)x, (float)y, tri);
 
         if (!_mm256_testz_si256(mask, mask)) {
           alignas(32) float depths[8];
-          InterpolateDepth8x_InverseZ((float)x, (float)y, tri, depths);
+          InterpolateDepth8x((float)x, (float)y, tri, depths);
           UpdateZBuffer8x(y * _ScreenWidth + x, depths, mask, tri.color);
         }
       }
@@ -719,7 +922,7 @@ void OptimizedMultiThreadedSIMDRasterizer::RenderTriangleInTile8x(const Transfor
         // Traitement pixel par pixel pour les bords
         for (int px = x; px < maxX; ++px) {
           if (TestPixels1x((float)px + 0.5f, (float)y + 0.5f, tri)) {
-            float depth = InterpolateDepth1x_InverseZ((float)px + 0.5f, (float)y + 0.5f, tri);
+            float depth = InterpolateDepth1x((float)px + 0.5f, (float)y + 0.5f, tri);
             int pixelIndex = y * _ScreenWidth + px;
 
             if (depth < _DepthBuffer[pixelIndex]) {
@@ -732,23 +935,9 @@ void OptimizedMultiThreadedSIMDRasterizer::RenderTriangleInTile8x(const Transfor
     }
   }
 }
+#endif // SIMD_AVX2
 
-//-----------------------------------------------------------------------------
-// InterpolateDepth1x_InverseZ
-//-----------------------------------------------------------------------------
-float OptimizedMultiThreadedSIMDRasterizer::InterpolateDepth1x_InverseZ(float x, float y, const TransformedTriangle& tri)
-{
-  // Calcul des coordonnees barycentriques
-  const float u = tri.edgeA[0] * x + tri.edgeB[0] * y + tri.edgeC[0];
-  const float v = tri.edgeA[1] * x + tri.edgeB[1] * y + tri.edgeC[1];
-  const float w = tri.edgeA[2] * x + tri.edgeB[2] * y + tri.edgeC[2];
-
-  // Interpolation lineaire de la profondeur Z (pour le Z-buffer)
-  return u * tri.screenVertices[0].z +
-    v * tri.screenVertices[1].z +
-    w * tri.screenVertices[2].z;
-}
-
+#ifdef SIMD_AVX2
 //-----------------------------------------------------------------------------
 // UpdateZBuffer8x
 //-----------------------------------------------------------------------------
@@ -777,29 +966,64 @@ void OptimizedMultiThreadedSIMDRasterizer::UpdateZBuffer8x(int pixelIndex, const
     }
   }
 }
+#endif // SIMD_AVX2
 
+#ifdef SIMD_AVX2
 //-----------------------------------------------------------------------------
-// SetRenderMode
-// Gestion des differents modes de rendu
+// CopyTileToMainBuffer8x
 //-----------------------------------------------------------------------------
-void OptimizedMultiThreadedSIMDRasterizer::SetRenderMode(RenderMode mode)
+void OptimizedMultiThreadedSIMDRasterizer::CopyTileToMainBuffer8x(const Tile& tile, ThreadLocalData* localData)
 {
-  _CurrentRenderMode = mode;
+  // Copie optimisee du tile local vers le buffer principal
+  for (int y = 0; y < tile.height; ++y)
+  {
+    const int globalY = tile.y + y;
+    const int localRowStart = y * tile.width;
+    const int globalRowStart = globalY * _ScreenWidth + tile.x;
 
-  switch (mode) {
-  case RenderMode::SCALAR:
-    std::cout << "Render mode: Scalar (no SIMD)" << std::endl;
-    break;
-  case RenderMode::SSE:
-    std::cout << "Render mode: SSE (4-wide SIMD)" << std::endl;
-    break;
-  case RenderMode::AVX2:
-    std::cout << "Render mode: AVX2 (8-wide SIMD)" << std::endl;
-    break;
-  case RenderMode::AVX512:
-    std::cout << "Render mode: AVX512 (16-wide SIMD)" << std::endl;
-    break;
+    // Copie vectorisee par chunks de 8 pixels
+    int x = 0;
+    for (; x + 8 <= tile.width; x += 8)
+    {
+      __m256i colors = _mm256_load_si256((__m256i*) & localData->_ColorBuffer[localRowStart + x]);
+      __m256 depths = _mm256_load_ps(&localData->_DepthBuffer[localRowStart + x]);
+
+      _mm256_storeu_si256((__m256i*) & _ColorBuffer[globalRowStart + x], colors);
+      _mm256_storeu_ps(&_DepthBuffer[globalRowStart + x], depths);
+    }
+
+    // Copie des pixels restants
+    for (; x < tile.width; ++x)
+    {
+      _ColorBuffer[globalRowStart + x] = localData->_ColorBuffer[localRowStart + x];
+      _DepthBuffer[globalRowStart + x] = localData->_DepthBuffer[localRowStart + x];
+    }
   }
 }
-
 #endif
+
+#ifdef SIMD_AVX2
+//-----------------------------------------------------------------------------
+// TransformVertexAVX2
+//-----------------------------------------------------------------------------
+glm::vec4 OptimizedMultiThreadedSIMDRasterizer::TransformVertexAVX2(const glm::vec3& vertex, const __m256& mvpRow0, const __m256& mvpRow1, const __m256& mvpRow2, const __m256& mvpRow3)
+{
+  // Vectorisation de la multiplication matrice-vecteur
+  const __m256 pos = _mm256_set_ps(0, 0, 0, 0, 1.0f, vertex.z, vertex.y, vertex.x);
+
+  __m256 result0 = _mm256_mul_ps(pos, mvpRow0);
+  __m256 result1 = _mm256_mul_ps(pos, mvpRow1);
+  __m256 result2 = _mm256_mul_ps(pos, mvpRow2);
+  __m256 result3 = _mm256_mul_ps(pos, mvpRow3);
+
+  // Reduction horizontale
+  result0 = _mm256_hadd_ps(result0, result1);
+  result2 = _mm256_hadd_ps(result2, result3);
+  result0 = _mm256_hadd_ps(result0, result2);
+
+  alignas(32) float results[8];
+  _mm256_store_ps(results, result0);
+
+  return glm::vec4(results[0] + results[4], results[1] + results[5], results[2] + results[6], results[3] + results[7]);
+}
+#endif // SIMD_AVX2

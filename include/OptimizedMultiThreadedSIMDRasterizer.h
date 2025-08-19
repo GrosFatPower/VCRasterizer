@@ -15,7 +15,6 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
-#if defined(SIMD_AVX2)
 class OptimizedMultiThreadedSIMDRasterizer : public Renderer
 {
 public:
@@ -76,7 +75,6 @@ protected:
 protected:
   // Pipeline de rendu optimise
   void Clear(uint32_t color = 0xADD8E6FF);
-  void TransformTrianglesVectorized(const glm::mat4& mvp);
   void HierarchicalBinning();
   void RenderTrianglesMultiThreaded();
 
@@ -84,29 +82,43 @@ protected:
   void WorkerThreadFunctionOptimized(int threadId);
   bool StealWork(int threadId, int& outTileIndex);
 
-  // Rendu de tuiles avec SIMD
-  void RenderTileAVX2(const Tile& tile, ThreadLocalData* localData);
-  void RenderTriangleInTile16x(const TransformedTriangle& tri, const Tile& tile, ThreadLocalData* localData);
-  void RenderTriangleInTile8x(const TransformedTriangle& tri, const Tile& tile);
+  glm::vec4 TransformVertex(const glm::vec3& vertex, const glm::mat4& mvp);
+  void TransformTriangles(const glm::mat4& mvp);
 
-  // Tests de pixels optimises
-  __m256i TestPixels8xOptimized(float startX, float y, const TransformedTriangle& tri);
-  bool TestPixels1x(float x, float y, const TransformedTriangle& tri);
+  void RenderTile(const Tile& tile, ThreadLocalData* localData);
+
   bool TestBlockVisibility(int blockX, int blockY, int blockW, int blockH, const TransformedTriangle& tri);
 
-  // Interpolation de profondeur
-  void InterpolateDepth8x_InverseZ(float startX, float y, const TransformedTriangle& tri, float* output);
-  float InterpolateDepth1x_InverseZ(float x, float y, const TransformedTriangle& tri);
+  bool TestPixels1x(float x, float y, const TransformedTriangle& tri);
+  float InterpolateDepth1x(float x, float y, const TransformedTriangle& tri);
 
-  // Mise e jour des buffers
-  void UpdateZBuffer8x(int pixelIndex, const float* depths, const __m256i& mask, uint32_t color);
-  void UpdateLocalBuffer8x(int localX, int localY, int tileWidth, const float* depths, const __m256i& mask, uint32_t color, ThreadLocalData* localData);
+  void RenderTriangleInTile(const TransformedTriangle& tri, const Tile& tile, ThreadLocalData* localData);
+
   void CopyTileToMainBuffer(const Tile& tile, ThreadLocalData* localData);
 
-  // Utilitaires de transformation SIMD
-  glm::vec4 TransformVertexSIMD(const glm::vec3& vertex, const __m256& mvpRow0, const __m256& mvpRow1, const __m256& mvpRow2, const __m256& mvpRow3);
-  void SetupTriangleDataOptimized(TransformedTriangle& tri);
+  void SetupTriangleData(TransformedTriangle& tri);
   void InitializeLookupTables();
+
+#ifdef SIMD_AVX2
+  void Clear8x(uint32_t color = 0xADD8E6FF);
+
+  void TransformTrianglesAVX2(const glm::mat4& mvp);
+
+  void RenderTileAVX2(const Tile& tile, ThreadLocalData* localData);
+  
+  void RenderTriangleInTile16x(const TransformedTriangle& tri, const Tile& tile, ThreadLocalData* localData);
+  void RenderTriangleInTile8x(const TransformedTriangle& tri, const Tile& tile);
+  
+  __m256i TestPixels8x(float startX, float y, const TransformedTriangle& tri);
+  void InterpolateDepth8x(float startX, float y, const TransformedTriangle& tri, float* output);
+  
+  void UpdateZBuffer8x(int pixelIndex, const float* depths, const __m256i& mask, uint32_t color);
+  void UpdateLocalBuffer8x(int localX, int localY, int tileWidth, const float* depths, const __m256i& mask, uint32_t color, ThreadLocalData* localData);
+
+  void CopyTileToMainBuffer8x(const Tile& tile, ThreadLocalData* localData);
+  
+  glm::vec4 TransformVertexAVX2(const glm::vec3& vertex, const __m256& mvpRow0, const __m256& mvpRow1, const __m256& mvpRow2, const __m256& mvpRow3);
+#endif
 
 private:
   // Donnees de tiling
@@ -131,9 +143,6 @@ private:
 
   // Scene
   std::vector<TransformedTriangle> _Transformed;
-
-  // Configuration et flags
-  RenderMode _CurrentRenderMode = RenderMode::AVX2;
 
   // Lookup tables pour optimisations
   alignas(32) float _EdgeLUT[256];
@@ -173,31 +182,3 @@ inline OptimizedMultiThreadedSIMDRasterizer::TileData& OptimizedMultiThreadedSIM
   }
   return *this;
 }
-
-#else
-
-class OptimizedMultiThreadedSIMDRasterizer : public Renderer
-{
-public:
-  OptimizedMultiThreadedSIMDRasterizer(int w, int h, int numThreads = 0)
-    : Renderer(w, h)
-  {}
-
-  virtual ~OptimizedMultiThreadedSIMDRasterizer() = default;
-  
-  virtual int InitScene(const int nbTris = 100) override
-  {
-    return Renderer::InitScene(nbTris);
-  }
-
-  virtual void RenderRotatingScene(float time) override
-  {
-  } 
-
-  virtual void SetTriangles(const std::vector<Triangle>& triangles) override
-  {
-    Renderer::SetTriangles(triangles);
-  } 
-};  
-
-#endif // SIMD_AVX2

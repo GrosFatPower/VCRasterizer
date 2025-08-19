@@ -40,8 +40,8 @@ protected:
   void RenderTile(const Tile& tile);
 
   void RenderTriangles(const glm::mat4& mvp);
-  void RenderTrianglesInBatch(const glm::mat4& mvp);
 
+  void TransformTrianglesInBatch(const glm::mat4& mvp);
   void SetupTriangleData(TransformedTriangle& tri);
 
   glm::vec4 TransformVertex(const glm::vec3& vertex, const glm::mat4& mvp);

@@ -28,7 +28,7 @@ public:
 
 protected:
 
-  void Clear(uint32_t color = 0x000000FF);
+  void Clear(uint32_t color = 0xADD8E6FF);
 
   // Binning des triangles par tuile (avec overlap detection)
   void BinTrianglesToTiles();

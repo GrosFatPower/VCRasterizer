@@ -9,6 +9,9 @@
 #include <cmath>
 #include <glm/glm.hpp>
 
+constexpr float G_EPSILON = 1e-6f;
+constexpr float G_INFINITY = std::numeric_limits<float>::infinity();
+
 struct Triangle
 {
   glm::vec3 vertices[3];

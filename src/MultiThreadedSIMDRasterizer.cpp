@@ -80,7 +80,7 @@ void MultiThreadedSIMDRasterizer::Clear(uint32_t color)
         std::launch::async, [this, start, end, color]()
         {
           std::fill(_ColorBuffer.begin() + start, _ColorBuffer.begin() + end, color);
-          std::fill(_DepthBuffer.begin() + start, _DepthBuffer.begin() + end, std::numeric_limits<float>::max());
+          std::fill(_DepthBuffer.begin() + start, _DepthBuffer.begin() + end, G_INFINITY);
         }
       )
     );
@@ -470,7 +470,7 @@ float MultiThreadedSIMDRasterizer::InterpolateDepth1x(float x, float y, const Tr
   if (interpolated_inv_z != 0.0f)
     return 1.0f / interpolated_inv_z;
 
-  return std::numeric_limits<float>::max(); // Protection contre division par zero
+  return G_INFINITY; // Protection contre division par zero
 }
 
 //-----------------------------------------------------------------------------

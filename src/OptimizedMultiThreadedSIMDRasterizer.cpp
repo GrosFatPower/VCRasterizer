@@ -1,4 +1,3 @@
-// OptimizedMultiThreadedSIMDRasterizer.cpp - Implementation complete
 #include "OptimizedMultiThreadedSIMDRasterizer.h"
 
 #if defined(SIMD_AVX2)
@@ -7,12 +6,15 @@
 #include <iostream>
 #include <cmath>
 
+//-----------------------------------------------------------------------------
+// CTOR
+//-----------------------------------------------------------------------------
 OptimizedMultiThreadedSIMDRasterizer::OptimizedMultiThreadedSIMDRasterizer(int w, int h, int numThreads)
   : Renderer(w, h)
 {
   // Calcul du nombre de threads optimal
   _NumThreads = (numThreads <= 0) ? std::thread::hardware_concurrency() : numThreads;
-  _NumThreads = std::min(_NumThreads, 16); // Limiter e 16 threads max
+  //_NumThreads = std::min(_NumThreads, 16); // Limiter e 16 threads max
 
   // Configuration des tuiles
   _TileCountX = (_ScreenWidth + TILE_SIZE - 1) / TILE_SIZE;
@@ -26,26 +28,23 @@ OptimizedMultiThreadedSIMDRasterizer::OptimizedMultiThreadedSIMDRasterizer(int w
     for (int tx = 0; tx < _TileCountX; ++tx)
     {
       int tileIndex = ty * _TileCountX + tx;
-      TileData& tileData = _OptimizedTiles[tileIndex];
+      TileData & tileData = _OptimizedTiles[tileIndex];
 
-      tileData.tile.x = tx * TILE_SIZE;
-      tileData.tile.y = ty * TILE_SIZE;
-      tileData.tile.width = std::min(TILE_SIZE, _ScreenWidth - tileData.tile.x);
-      tileData.tile.height = std::min(TILE_SIZE, _ScreenHeight - tileData.tile.y);
-      tileData.triangleCount = 0;
-      tileData.needsProcessing = false;
+      tileData._Tile.x = tx * TILE_SIZE;
+      tileData._Tile.y = ty * TILE_SIZE;
+      tileData._Tile.width = std::min(TILE_SIZE, _ScreenWidth - tileData._Tile.x);
+      tileData._Tile.height = std::min(TILE_SIZE, _ScreenHeight - tileData._Tile.y);
+      tileData._TriangleCountAtomic = 0;
+      tileData._NeedsProcessingAtomic = false;
 
-      tileData.triangles.reserve(1000); // Reserver de l'espace
+      tileData._Triangles.reserve(1000); // Reserver de l'espace
     }
   }
 
   // Initialisation des donnees thread-local
   _ThreadLocalData.resize(_NumThreads);
   for (int i = 0; i < _NumThreads; ++i)
-  {
     _ThreadLocalData[i] = std::make_unique<ThreadLocalData>();
-    _ThreadLocalData[i]->localTriangles.reserve(1000);
-  }
 
   // Initialisation de la lookup table pour optimisations
   InitializeLookupTables();
@@ -63,10 +62,13 @@ OptimizedMultiThreadedSIMDRasterizer::OptimizedMultiThreadedSIMDRasterizer(int w
     << " threads, " << _TileCountX << "x" << _TileCountY << " tiles" << std::endl;
 }
 
+//-----------------------------------------------------------------------------
+// DTOR
+//-----------------------------------------------------------------------------
 OptimizedMultiThreadedSIMDRasterizer::~OptimizedMultiThreadedSIMDRasterizer()
 {
   // Arret des threads
-  _ThreadsShouldRun.store(false);
+  _ThreadsShouldRunAtomic.store(false);
   _RenderCV.notify_all();
 
   for (auto& thread : _WorkerThreads)
@@ -78,6 +80,9 @@ OptimizedMultiThreadedSIMDRasterizer::~OptimizedMultiThreadedSIMDRasterizer()
   }
 }
 
+//-----------------------------------------------------------------------------
+// InitializeLookupTables
+//-----------------------------------------------------------------------------
 void OptimizedMultiThreadedSIMDRasterizer::InitializeLookupTables()
 {
   // Initialisation de la lookup table pour les edge functions
@@ -87,6 +92,9 @@ void OptimizedMultiThreadedSIMDRasterizer::InitializeLookupTables()
   }
 }
 
+//-----------------------------------------------------------------------------
+// InitScene
+//-----------------------------------------------------------------------------
 int OptimizedMultiThreadedSIMDRasterizer::InitScene(const int nbTris)
 {
   LoadTriangles(_Triangles, nbTris);
@@ -94,12 +102,18 @@ int OptimizedMultiThreadedSIMDRasterizer::InitScene(const int nbTris)
   return 0;
 }
 
+//-----------------------------------------------------------------------------
+// SetTriangles
+//-----------------------------------------------------------------------------
 void OptimizedMultiThreadedSIMDRasterizer::SetTriangles(const std::vector<Triangle>& triangles)
 {
   _Triangles = triangles;
   _Transformed.resize(triangles.size());
 }
 
+//-----------------------------------------------------------------------------
+// RenderRotatingScene
+//-----------------------------------------------------------------------------
 void OptimizedMultiThreadedSIMDRasterizer::RenderRotatingScene(float time)
 {
   Clear(0xADD8E6FF);
@@ -120,29 +134,36 @@ void OptimizedMultiThreadedSIMDRasterizer::RenderRotatingScene(float time)
   RenderTrianglesMultiThreaded();
 }
 
+//-----------------------------------------------------------------------------
+// Clear
+//-----------------------------------------------------------------------------
 void OptimizedMultiThreadedSIMDRasterizer::Clear(uint32_t color)
 {
   // Clear vectorise
   const __m256i clearColor = _mm256_set1_epi32(color);
-  const __m256 clearDepth = _mm256_set1_ps(std::numeric_limits<float>::max());
+  const __m256 clearDepth = _mm256_set1_ps(G_INFINITY);
 
   const size_t pixelCount = _ScreenWidth * _ScreenHeight;
   const size_t simdPixels = (pixelCount / 8) * 8;
 
   // Clear en parallele
-#pragma omp parallel for
-  for (int i = 0; i < simdPixels; i += 8) {
+  for (int i = 0; i < simdPixels; i += 8)
+  {
     _mm256_store_si256((__m256i*) & _ColorBuffer[i], clearColor);
     _mm256_store_ps(&_DepthBuffer[i], clearDepth);
   }
 
   // Clear des pixels restants
-  for (size_t i = simdPixels; i < pixelCount; ++i) {
+  for (size_t i = simdPixels; i < pixelCount; ++i)
+  {
     _ColorBuffer[i] = color;
-    _DepthBuffer[i] = std::numeric_limits<float>::max();
+    _DepthBuffer[i] = G_INFINITY;
   }
 }
 
+//-----------------------------------------------------------------------------
+// TransformTrianglesVectorized
+//-----------------------------------------------------------------------------
 void OptimizedMultiThreadedSIMDRasterizer::TransformTrianglesVectorized(const glm::mat4& mvp)
 {
   const size_t triangleCount = _Triangles.size();
@@ -150,8 +171,10 @@ void OptimizedMultiThreadedSIMDRasterizer::TransformTrianglesVectorized(const gl
 
   // Matrice transposee pour vectorisation optimale
   alignas(32) float mvpTransposed[16];
-  for (int i = 0; i < 4; ++i) {
-    for (int j = 0; j < 4; ++j) {
+  for (int i = 0; i < 4; ++i)
+  {
+    for (int j = 0; j < 4; ++j)
+    {
       mvpTransposed[i * 4 + j] = mvp[j][i];
     }
   }
@@ -162,17 +185,19 @@ void OptimizedMultiThreadedSIMDRasterizer::TransformTrianglesVectorized(const gl
   const __m256 mvpRow3 = _mm256_load_ps(&mvpTransposed[12]);
 
   // Transformation en parallele
-#pragma omp parallel for
-  for (int triIndex = 0; triIndex < triangleCount; ++triIndex) {
+  for (int triIndex = 0; triIndex < triangleCount; ++triIndex)
+  {
     const Triangle& tri = _Triangles[triIndex];
     TransformedTriangle& transformedTri = _Transformed[triIndex];
 
     // Transformer les 3 vertices du triangle
-    for (int v = 0; v < 3; ++v) {
+    for (int v = 0; v < 3; ++v)
+    {
       glm::vec4 clipSpace = TransformVertexSIMD(tri.vertices[v], mvpRow0, mvpRow1, mvpRow2, mvpRow3);
 
       // Conversion vers coordonnees ecran
-      if (clipSpace.w > 0.0f) {
+      if (clipSpace.w > 0.0f)
+      {
         float invW = 1.0f / clipSpace.w;
         transformedTri.screenVertices[v] = glm::vec4(
           (clipSpace.x * invW + 1.0f) * 0.5f * _ScreenWidth,
@@ -182,7 +207,8 @@ void OptimizedMultiThreadedSIMDRasterizer::TransformTrianglesVectorized(const gl
         );
         transformedTri.valid = true;
       }
-      else {
+      else
+      {
         transformedTri.valid = false;
         continue;
       }
@@ -190,14 +216,17 @@ void OptimizedMultiThreadedSIMDRasterizer::TransformTrianglesVectorized(const gl
 
     transformedTri.color = tri.color;
 
-    if (transformedTri.valid) {
+    if (transformedTri.valid)
+    {
       SetupTriangleDataOptimized(transformedTri);
     }
   }
 }
 
-glm::vec4 OptimizedMultiThreadedSIMDRasterizer::TransformVertexSIMD(const glm::vec3& vertex,
-  const __m256& mvpRow0, const __m256& mvpRow1, const __m256& mvpRow2, const __m256& mvpRow3)
+//-----------------------------------------------------------------------------
+// TransformVertexSIMD
+//-----------------------------------------------------------------------------
+glm::vec4 OptimizedMultiThreadedSIMDRasterizer::TransformVertexSIMD(const glm::vec3& vertex, const __m256& mvpRow0, const __m256& mvpRow1, const __m256& mvpRow2, const __m256& mvpRow3)
 {
   // Vectorisation de la multiplication matrice-vecteur
   const __m256 pos = _mm256_set_ps(0, 0, 0, 0, 1.0f, vertex.z, vertex.y, vertex.x);
@@ -215,24 +244,28 @@ glm::vec4 OptimizedMultiThreadedSIMDRasterizer::TransformVertexSIMD(const glm::v
   alignas(32) float results[8];
   _mm256_store_ps(results, result0);
 
-  return glm::vec4(results[0] + results[4], results[1] + results[5],
-    results[2] + results[6], results[3] + results[7]);
+  return glm::vec4(results[0] + results[4], results[1] + results[5], results[2] + results[6], results[3] + results[7]);
 }
 
+//-----------------------------------------------------------------------------
+// HierarchicalBinning
+//-----------------------------------------------------------------------------
 void OptimizedMultiThreadedSIMDRasterizer::HierarchicalBinning()
 {
   // Reset des tuiles
-  for (auto& tileData : _OptimizedTiles) {
-    tileData.triangles.clear();
-    tileData.triangleCount = 0;
-    tileData.needsProcessing = false;
+  for (auto& tileData : _OptimizedTiles)
+  {
+    tileData._Triangles.clear();
+    tileData._TriangleCountAtomic = 0;
+    tileData._NeedsProcessingAtomic = false;
   }
 
   // Binning hierarchique avec frustum culling
-#pragma omp parallel for
-  for (int triIndex = 0; triIndex < _Transformed.size(); ++triIndex) {
+  for (int triIndex = 0; triIndex < _Transformed.size(); ++triIndex)
+  {
     const TransformedTriangle& tri = _Transformed[triIndex];
-    if (!tri.valid) continue;
+    if (!tri.valid)
+      continue;
 
     // Calcul de la bounding box du triangle
     float minX = std::min({ tri.screenVertices[0].x, tri.screenVertices[1].x, tri.screenVertices[2].x });
@@ -241,9 +274,8 @@ void OptimizedMultiThreadedSIMDRasterizer::HierarchicalBinning()
     float maxY = std::max({ tri.screenVertices[0].y, tri.screenVertices[1].y, tri.screenVertices[2].y });
 
     // Frustum culling
-    if (maxX < 0 || minX >= _ScreenWidth || maxY < 0 || minY >= _ScreenHeight) {
+    if (maxX < 0 || minX >= _ScreenWidth || maxY < 0 || minY >= _ScreenHeight)
       continue;
-    }
 
     // Calcul des tuiles affectees
     int tileMinX = std::max(0, (int)(minX / TILE_SIZE));
@@ -252,63 +284,71 @@ void OptimizedMultiThreadedSIMDRasterizer::HierarchicalBinning()
     int tileMaxY = std::min(_TileCountY - 1, (int)(maxY / TILE_SIZE));
 
     // Ajout du triangle aux tuiles concernees
-    for (int ty = tileMinY; ty <= tileMaxY; ++ty) {
-      for (int tx = tileMinX; tx <= tileMaxX; ++tx) {
+    for (int ty = tileMinY; ty <= tileMaxY; ++ty)
+    {
+      for (int tx = tileMinX; tx <= tileMaxX; ++tx)
+      {
         int tileIndex = ty * _TileCountX + tx;
-
-#pragma omp critical
         {
-          _OptimizedTiles[tileIndex].triangles.push_back(&tri);
-          _OptimizedTiles[tileIndex].triangleCount++;
-          _OptimizedTiles[tileIndex].needsProcessing = true;
+          _OptimizedTiles[tileIndex]._Triangles.push_back(&tri);
+          _OptimizedTiles[tileIndex]._TriangleCountAtomic++;
+          _OptimizedTiles[tileIndex]._NeedsProcessingAtomic = true;
         }
       }
     }
   }
 }
 
+//-----------------------------------------------------------------------------
+// RenderTrianglesMultiThreaded
+//-----------------------------------------------------------------------------
 void OptimizedMultiThreadedSIMDRasterizer::RenderTrianglesMultiThreaded()
 {
   // Reset des index de travail
-  _WorkStealingIndex.store(0);
-  for (auto& index : _ThreadWorkIndices) {
+  _WorkStealingIndexAtomic.store(0);
+  for (auto& index : _ThreadWorkIndices)
+  {
     index.store(0);
   }
 
   // Demarrage du rendu multi-threade
   {
     std::lock_guard<std::mutex> lock(_RenderMutex);
-    _RenderingActive.store(true);
+    _RenderingActiveAtomic.store(true);
   }
   _RenderCV.notify_all();
 
   // Attendre que tous les threads finissent
   std::unique_lock<std::mutex> lock(_TilesDoneMutex);
   _TilesDoneCV.wait(lock, [this] {
-    return _WorkStealingIndex.load() >= _OptimizedTiles.size();
+    return _WorkStealingIndexAtomic.load() >= _OptimizedTiles.size();
     });
 
-  _RenderingActive.store(false);
+  _RenderingActiveAtomic.store(false);
 }
 
+//-----------------------------------------------------------------------------
+// WorkerThreadFunctionOptimized
+//-----------------------------------------------------------------------------
 void OptimizedMultiThreadedSIMDRasterizer::WorkerThreadFunctionOptimized(int threadId)
 {
   ThreadLocalData* localData = _ThreadLocalData[threadId].get();
 
-  while (_ThreadsShouldRun.load()) {
+  while (_ThreadsShouldRunAtomic.load())
+  {
     std::unique_lock<std::mutex> lock(_RenderMutex);
-    _RenderCV.wait(lock, [this] { return _RenderingActive.load() || !_ThreadsShouldRun.load(); });
+    _RenderCV.wait(lock, [this] { return _RenderingActiveAtomic.load() || !_ThreadsShouldRunAtomic.load(); });
 
-    if (!_ThreadsShouldRun.load()) break;
+    if (!_ThreadsShouldRunAtomic.load()) break;
     lock.unlock();
 
     // Work stealing
     int tileIndex;
-    while ((tileIndex = _WorkStealingIndex.fetch_add(1)) < _OptimizedTiles.size()) {
+    while ((tileIndex = _WorkStealingIndexAtomic.fetch_add(1)) < _OptimizedTiles.size()) {
       const TileData& tileData = _OptimizedTiles[tileIndex];
 
-      if (tileData.needsProcessing && tileData.triangleCount >= MIN_TRIANGLES_PER_TILE) {
-        RenderTileAVX2(tileData.tile, localData);
+      if (tileData._NeedsProcessingAtomic && tileData._TriangleCountAtomic >= MIN_TRIANGLES_PER_TILE) {
+        RenderTileAVX2(tileData._Tile, localData);
       }
     }
 
@@ -317,16 +357,23 @@ void OptimizedMultiThreadedSIMDRasterizer::WorkerThreadFunctionOptimized(int thr
   }
 }
 
+//-----------------------------------------------------------------------------
+// StealWork
+//-----------------------------------------------------------------------------
 bool OptimizedMultiThreadedSIMDRasterizer::StealWork(int threadId, int& outTileIndex)
 {
   // Tentative de vol de travail depuis d'autres threads
-  for (int i = 0; i < _NumThreads; ++i) {
-    if (i == threadId) continue;
+  for (int i = 0; i < _NumThreads; ++i)
+  {
+    if (i == threadId)
+      continue;
 
     int otherIndex = _ThreadWorkIndices[i].load();
-    if (otherIndex < _OptimizedTiles.size()) {
+    if (otherIndex < _OptimizedTiles.size())
+    {
       int stolenIndex = _ThreadWorkIndices[i].fetch_add(1);
-      if (stolenIndex < _OptimizedTiles.size()) {
+      if (stolenIndex < _OptimizedTiles.size())
+      {
         outTileIndex = stolenIndex;
         return true;
       }
@@ -335,6 +382,9 @@ bool OptimizedMultiThreadedSIMDRasterizer::StealWork(int threadId, int& outTileI
   return false;
 }
 
+//-----------------------------------------------------------------------------
+// RenderTileAVX2
+//-----------------------------------------------------------------------------
 void OptimizedMultiThreadedSIMDRasterizer::RenderTileAVX2(const Tile& tile, ThreadLocalData* localData)
 {
   const int tileIndex = (tile.y / TILE_SIZE) * _TileCountX + (tile.x / TILE_SIZE);
@@ -342,18 +392,21 @@ void OptimizedMultiThreadedSIMDRasterizer::RenderTileAVX2(const Tile& tile, Thre
 
   // Clear du tile local
   const __m256i clearColor = _mm256_set1_epi32(0xADD8E6FF);
-  const __m256 clearDepth = _mm256_set1_ps(std::numeric_limits<float>::max());
+  const __m256 clearDepth = _mm256_set1_ps(G_INFINITY);
 
   const int tilePixels = tile.width * tile.height;
-  for (int i = 0; i < tilePixels; i += 8) {
-    if (i + 8 <= tilePixels) {
-      _mm256_store_si256((__m256i*) & localData->colorBuffer[i], clearColor);
-      _mm256_store_ps(&localData->depthBuffer[i], clearDepth);
+  for (int i = 0; i < tilePixels; i += 8)
+  {
+    if (i + 8 <= tilePixels)
+    {
+      _mm256_store_si256((__m256i*) & localData->_ColorBuffer[i], clearColor);
+      _mm256_store_ps(&localData->_DepthBuffer[i], clearDepth);
     }
   }
 
   // Rendu de tous les triangles du tile
-  for (const TransformedTriangle* tri : tileData.triangles) {
+  for (const TransformedTriangle* tri : tileData._Triangles)
+  {
     RenderTriangleInTile16x(*tri, tile, localData);
   }
 
@@ -361,8 +414,10 @@ void OptimizedMultiThreadedSIMDRasterizer::RenderTileAVX2(const Tile& tile, Thre
   CopyTileToMainBuffer(tile, localData);
 }
 
-void OptimizedMultiThreadedSIMDRasterizer::RenderTriangleInTile16x(const TransformedTriangle& tri,
-  const Tile& tile, ThreadLocalData* localData)
+//-----------------------------------------------------------------------------
+// RenderTriangleInTile16x
+//-----------------------------------------------------------------------------
+void OptimizedMultiThreadedSIMDRasterizer::RenderTriangleInTile16x(const TransformedTriangle& tri, const Tile& tile, ThreadLocalData* localData)
 {
   const int startX = tile.x;
   const int startY = tile.y;
@@ -370,30 +425,33 @@ void OptimizedMultiThreadedSIMDRasterizer::RenderTriangleInTile16x(const Transfo
   const int endY = startY + tile.height;
 
   // Process par blocs 4x4
-  for (int blockY = startY; blockY < endY; blockY += 4) {
-    for (int blockX = startX; blockX < endX; blockX += 8) {
+  for (int blockY = startY; blockY < endY; blockY += 4)
+  {
+    for (int blockX = startX; blockX < endX; blockX += 8)
+    {
 
       // Test de visibilite rapide du bloc
-      if (!TestBlockVisibility(blockX, blockY, 8, 4, tri)) {
+      if (!TestBlockVisibility(blockX, blockY, 8, 4, tri))
         continue;
-      }
 
       // Process chaque ligne du bloc 4x4
-      for (int y = blockY; y < std::min(blockY + 4, endY); ++y) {
+      for (int y = blockY; y < std::min(blockY + 4, endY); ++y)
+      {
         const int maxX = std::min(blockX + 8, endX);
 
-        for (int x = blockX; x < maxX; x += 8) {
+        for (int x = blockX; x < maxX; x += 8)
+        {
           // Test de 8 pixels simultanes
           __m256i mask = TestPixels8xOptimized((float)x, (float)y, tri);
 
-          if (!_mm256_testz_si256(mask, mask)) {
+          if (!_mm256_testz_si256(mask, mask))
+          {
             // Calcul des profondeurs pour les 8 pixels
             alignas(32) float depths[8];
             InterpolateDepth8x_InverseZ((float)x, (float)y, tri, depths);
 
             // Mise e jour du buffer local
-            UpdateLocalBuffer8x(x - startX, y - startY, tile.width,
-              depths, mask, tri.color, localData);
+            UpdateLocalBuffer8x(x - startX, y - startY, tile.width, depths, mask, tri.color, localData);
           }
         }
       }
@@ -401,6 +459,9 @@ void OptimizedMultiThreadedSIMDRasterizer::RenderTriangleInTile16x(const Transfo
   }
 }
 
+//-----------------------------------------------------------------------------
+// TestPixels8xOptimized
+//-----------------------------------------------------------------------------
 __m256i OptimizedMultiThreadedSIMDRasterizer::TestPixels8xOptimized(float startX, float y, const TransformedTriangle& tri)
 {
   // Coordonnees des 8 pixels avec offset 0.5 pour le centre du pixel
@@ -436,6 +497,9 @@ __m256i OptimizedMultiThreadedSIMDRasterizer::TestPixels8xOptimized(float startX
   return _mm256_and_si256(_mm256_and_si256(mask0, mask1), mask2);
 }
 
+//-----------------------------------------------------------------------------
+// InterpolateDepth8x_InverseZ
+//-----------------------------------------------------------------------------
 void OptimizedMultiThreadedSIMDRasterizer::InterpolateDepth8x_InverseZ(float startX, float y,
   const TransformedTriangle& tri, float* output)
 {
@@ -470,13 +534,16 @@ void OptimizedMultiThreadedSIMDRasterizer::InterpolateDepth8x_InverseZ(float sta
   _mm256_store_ps(output, interpolatedZ);
 }
 
+//-----------------------------------------------------------------------------
+// UpdateLocalBuffer8x
+//-----------------------------------------------------------------------------
 void OptimizedMultiThreadedSIMDRasterizer::UpdateLocalBuffer8x(int localX, int localY, int tileWidth,
   const float* depths, const __m256i& mask, uint32_t color, ThreadLocalData* localData)
 {
   const int baseIndex = localY * tileWidth + localX;
 
   // Chargement des profondeurs actuelles
-  __m256 currentDepths = _mm256_loadu_ps(&localData->depthBuffer[baseIndex]);
+  __m256 currentDepths = _mm256_loadu_ps(&localData->_DepthBuffer[baseIndex]);
   __m256 newDepths = _mm256_load_ps(depths);
 
   // Test de profondeur
@@ -485,43 +552,51 @@ void OptimizedMultiThreadedSIMDRasterizer::UpdateLocalBuffer8x(int localX, int l
 
   // Mise e jour conditionnelle des profondeurs
   __m256 updatedDepths = _mm256_blendv_ps(currentDepths, newDepths, _mm256_castsi256_ps(finalMask));
-  _mm256_storeu_ps(&localData->depthBuffer[baseIndex], updatedDepths);
+  _mm256_storeu_ps(&localData->_DepthBuffer[baseIndex], updatedDepths);
 
   // Mise e jour des couleurs
   __m256i colorVec = _mm256_set1_epi32(color);
-  __m256i currentColors = _mm256_loadu_si256((__m256i*) & localData->colorBuffer[baseIndex]);
+  __m256i currentColors = _mm256_loadu_si256((__m256i*) & localData->_ColorBuffer[baseIndex]);
   __m256i updatedColors = _mm256_blendv_epi8(currentColors, colorVec, finalMask);
-  _mm256_storeu_si256((__m256i*) & localData->colorBuffer[baseIndex], updatedColors);
+  _mm256_storeu_si256((__m256i*) & localData->_ColorBuffer[baseIndex], updatedColors);
 }
 
+//-----------------------------------------------------------------------------
+// CopyTileToMainBuffer
+//-----------------------------------------------------------------------------
 void OptimizedMultiThreadedSIMDRasterizer::CopyTileToMainBuffer(const Tile& tile, ThreadLocalData* localData)
 {
   // Copie optimisee du tile local vers le buffer principal
-  for (int y = 0; y < tile.height; ++y) {
+  for (int y = 0; y < tile.height; ++y)
+  {
     const int globalY = tile.y + y;
     const int localRowStart = y * tile.width;
     const int globalRowStart = globalY * _ScreenWidth + tile.x;
 
     // Copie vectorisee par chunks de 8 pixels
     int x = 0;
-    for (; x + 8 <= tile.width; x += 8) {
-      __m256i colors = _mm256_load_si256((__m256i*) & localData->colorBuffer[localRowStart + x]);
-      __m256 depths = _mm256_load_ps(&localData->depthBuffer[localRowStart + x]);
+    for (; x + 8 <= tile.width; x += 8)
+    {
+      __m256i colors = _mm256_load_si256((__m256i*) & localData->_ColorBuffer[localRowStart + x]);
+      __m256 depths = _mm256_load_ps(&localData->_DepthBuffer[localRowStart + x]);
 
       _mm256_storeu_si256((__m256i*) & _ColorBuffer[globalRowStart + x], colors);
       _mm256_storeu_ps(&_DepthBuffer[globalRowStart + x], depths);
     }
 
     // Copie des pixels restants
-    for (; x < tile.width; ++x) {
-      _ColorBuffer[globalRowStart + x] = localData->colorBuffer[localRowStart + x];
-      _DepthBuffer[globalRowStart + x] = localData->depthBuffer[localRowStart + x];
+    for (; x < tile.width; ++x)
+    {
+      _ColorBuffer[globalRowStart + x] = localData->_ColorBuffer[localRowStart + x];
+      _DepthBuffer[globalRowStart + x] = localData->_DepthBuffer[localRowStart + x];
     }
   }
 }
 
-bool OptimizedMultiThreadedSIMDRasterizer::TestBlockVisibility(int blockX, int blockY, int blockW, int blockH,
-  const TransformedTriangle& tri)
+//-----------------------------------------------------------------------------
+// TestBlockVisibility
+//-----------------------------------------------------------------------------
+bool OptimizedMultiThreadedSIMDRasterizer::TestBlockVisibility(int blockX, int blockY, int blockW, int blockH, const TransformedTriangle& tri)
 {
   // Test rapide de visibilite du bloc entier
   // Teste les 4 coins du bloc
@@ -532,11 +607,11 @@ bool OptimizedMultiThreadedSIMDRasterizer::TestBlockVisibility(int blockX, int b
       {(float)(blockX + blockW - 1), (float)(blockY + blockH - 1)}
   };
 
-  // Si au moins un coin est e l'interieur, le bloc est potentiellement visible
-  for (int i = 0; i < 4; ++i) {
-    if (TestPixels1x(corners[i][0] + 0.5f, corners[i][1] + 0.5f, tri)) {
+  // Si au moins un coin est a l'interieur, le bloc est potentiellement visible
+  for (int i = 0; i < 4; ++i)
+  {
+    if (TestPixels1x(corners[i][0] + 0.5f, corners[i][1] + 0.5f, tri))
       return true;
-    }
   }
 
   // Test inverse : si le triangle recouvre le bloc
@@ -546,6 +621,9 @@ bool OptimizedMultiThreadedSIMDRasterizer::TestBlockVisibility(int blockX, int b
   return TestPixels1x(blockCenterX, blockCenterY, tri);
 }
 
+//-----------------------------------------------------------------------------
+// TestPixels1x
+//-----------------------------------------------------------------------------
 bool OptimizedMultiThreadedSIMDRasterizer::TestPixels1x(float x, float y, const TransformedTriangle& tri)
 {
   const float edge0 = tri.edgeA[0] * x + tri.edgeB[0] * y + tri.edgeC[0];
@@ -555,6 +633,9 @@ bool OptimizedMultiThreadedSIMDRasterizer::TestPixels1x(float x, float y, const 
   return (edge0 >= 0.0f) && (edge1 >= 0.0f) && (edge2 >= 0.0f);
 }
 
+//-----------------------------------------------------------------------------
+// SetupTriangleDataOptimized
+//-----------------------------------------------------------------------------
 void OptimizedMultiThreadedSIMDRasterizer::SetupTriangleDataOptimized(TransformedTriangle& tri)
 {
   const glm::vec4& v0 = tri.screenVertices[0];
@@ -578,13 +659,15 @@ void OptimizedMultiThreadedSIMDRasterizer::SetupTriangleDataOptimized(Transforme
   tri.area = tri.edgeC[0] + tri.edgeC[1] + tri.edgeC[2];
 
   // Verification de validite du triangle
-  if (std::abs(tri.area) < 1e-6f) {
+  if (std::abs(tri.area) < G_EPSILON)
+  {
     tri.valid = false;
     return;
   }
 
   // Back-face culling (optionnel)
-  if (GetBackfaceCullingEnabled() && tri.area <= 0.0f) {
+  if (GetBackfaceCullingEnabled() && tri.area <= 0.0f)
+  {
     tri.valid = false;
     return;
   }
@@ -605,30 +688,10 @@ void OptimizedMultiThreadedSIMDRasterizer::SetupTriangleDataOptimized(Transforme
   tri.invDepths[2] = (v2.w != 0.0f) ? 1.0f / v2.w : 1.0f;
 }
 
-// Methodes additionnelles pour completer l'interface Renderer
-void OptimizedMultiThreadedSIMDRasterizer::SetEnableSIMD(bool enable)
-{
-  _EnableSIMD = enable;
-  std::cout << "SIMD " << (enable ? "Enabled" : "Disabled") << std::endl;
-}
-
-bool OptimizedMultiThreadedSIMDRasterizer::GetEnableSIMD() const
-{
-  return _EnableSIMD;
-}
-
-void OptimizedMultiThreadedSIMDRasterizer::SetBackfaceCullingEnabled(bool enable)
-{
-  _BackfaceCullingEnabled = enable;
-  std::cout << "Backface Culling " << (enable ? "Enabled" : "Disabled") << std::endl;
-}
-
-bool OptimizedMultiThreadedSIMDRasterizer::GetBackfaceCullingEnabled() const
-{
-  return _BackfaceCullingEnabled;
-}
-
+//-----------------------------------------------------------------------------
+// RenderTriangleInTile8x
 // Versions alternatives pour comparaison de performance
+//-----------------------------------------------------------------------------
 void OptimizedMultiThreadedSIMDRasterizer::RenderTriangleInTile8x(const TransformedTriangle& tri, const Tile& tile)
 {
   const int startX = tile.x;
@@ -670,6 +733,9 @@ void OptimizedMultiThreadedSIMDRasterizer::RenderTriangleInTile8x(const Transfor
   }
 }
 
+//-----------------------------------------------------------------------------
+// InterpolateDepth1x_InverseZ
+//-----------------------------------------------------------------------------
 float OptimizedMultiThreadedSIMDRasterizer::InterpolateDepth1x_InverseZ(float x, float y, const TransformedTriangle& tri)
 {
   // Calcul des coordonnees barycentriques
@@ -683,6 +749,9 @@ float OptimizedMultiThreadedSIMDRasterizer::InterpolateDepth1x_InverseZ(float x,
     w * tri.screenVertices[2].z;
 }
 
+//-----------------------------------------------------------------------------
+// UpdateZBuffer8x
+//-----------------------------------------------------------------------------
 void OptimizedMultiThreadedSIMDRasterizer::UpdateZBuffer8x(int pixelIndex, const float* depths, const __m256i& mask, uint32_t color)
 {
   // Chargement des profondeurs actuelles du Z-buffer
@@ -709,32 +778,10 @@ void OptimizedMultiThreadedSIMDRasterizer::UpdateZBuffer8x(int pixelIndex, const
   }
 }
 
-// Methodes de debugging et profiling
-void OptimizedMultiThreadedSIMDRasterizer::PrintPerformanceStats() const
-{
-  std::cout << "\n=== PERFORMANCE STATISTICS ===" << std::endl;
-  std::cout << "Triangles processed: " << _TrianglesProcessed.load() << std::endl;
-  std::cout << "Pixels rasterized: " << _PixelsRasterized.load() << std::endl;
-  std::cout << "Number of tiles: " << _OptimizedTiles.size() << std::endl;
-  std::cout << "Active threads: " << _NumThreads << std::endl;
-
-  // Calcul du pourcentage de tuiles actives
-  int activeTiles = 0;
-  for (const auto& tile : _OptimizedTiles) {
-    if (tile.needsProcessing) activeTiles++;
-  }
-
-  float tileUtilization = (float)activeTiles / _OptimizedTiles.size() * 100.0f;
-  std::cout << "Tile utilization: " << tileUtilization << "%" << std::endl;
-}
-
-void OptimizedMultiThreadedSIMDRasterizer::ResetPerformanceCounters()
-{
-  _TrianglesProcessed.store(0);
-  _PixelsRasterized.store(0);
-}
-
+//-----------------------------------------------------------------------------
+// SetRenderMode
 // Gestion des differents modes de rendu
+//-----------------------------------------------------------------------------
 void OptimizedMultiThreadedSIMDRasterizer::SetRenderMode(RenderMode mode)
 {
   _CurrentRenderMode = mode;
@@ -753,51 +800,6 @@ void OptimizedMultiThreadedSIMDRasterizer::SetRenderMode(RenderMode mode)
     std::cout << "Render mode: AVX512 (16-wide SIMD)" << std::endl;
     break;
   }
-}
-
-// Methode de benchmark interne
-double OptimizedMultiThreadedSIMDRasterizer::BenchmarkRenderTime(int frames)
-{
-  auto start = std::chrono::high_resolution_clock::now();
-
-  for (int i = 0; i < frames; ++i) {
-    RenderRotatingScene(i * 0.016f);
-  }
-
-  auto end = std::chrono::high_resolution_clock::now();
-  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-
-  return duration.count() / 1000.0; // Retour en millisecondes
-}
-
-// Validation de la coherence des resultats
-bool OptimizedMultiThreadedSIMDRasterizer::ValidateResults(const OptimizedMultiThreadedSIMDRasterizer& reference)
-{
-  const uint32_t* refColorBuffer = reference.GetColorBuffer();
-  const float* refDepthBuffer = reference.GetDepthBuffer();
-
-  int pixelDifferences = 0;
-  int depthDifferences = 0;
-  const int totalPixels = _ScreenWidth * _ScreenHeight;
-
-  for (int i = 0; i < totalPixels; ++i) {
-    if (_ColorBuffer[i] != refColorBuffer[i]) {
-      pixelDifferences++;
-    }
-
-    if (std::abs(_DepthBuffer[i] - refDepthBuffer[i]) > 1e-5f) {
-      depthDifferences++;
-    }
-  }
-
-  const float colorAccuracy = 1.0f - (float)pixelDifferences / totalPixels;
-  const float depthAccuracy = 1.0f - (float)depthDifferences / totalPixels;
-
-  std::cout << "Validation Results:" << std::endl;
-  std::cout << "Color accuracy: " << (colorAccuracy * 100.0f) << "%" << std::endl;
-  std::cout << "Depth accuracy: " << (depthAccuracy * 100.0f) << "%" << std::endl;
-
-  return (colorAccuracy > 0.99f) && (depthAccuracy > 0.99f);
 }
 
 #endif

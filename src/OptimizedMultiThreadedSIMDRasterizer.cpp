@@ -355,13 +355,14 @@ void OptimizedMultiThreadedSIMDRasterizer::WorkerThreadFunctionOptimized(int thr
 {
   ThreadLocalData* localData = _ThreadLocalData[threadId].get();
 
-  while (_ThreadsShouldRunAtomic.load())
+  while ( _ThreadsShouldRunAtomic.load() )
   {
-    std::unique_lock<std::mutex> lock(_RenderMutex);
-    _RenderCV.wait(lock, [this] { return _RenderingActiveAtomic.load() || !_ThreadsShouldRunAtomic.load(); });
-
-    if (!_ThreadsShouldRunAtomic.load()) break;
-    lock.unlock();
+    {
+      std::unique_lock<std::mutex> lock(_RenderMutex);
+      _RenderCV.wait(lock, [this] { return _RenderingActiveAtomic.load() || !_ThreadsShouldRunAtomic.load(); });
+    }
+    if ( !_ThreadsShouldRunAtomic.load() )
+      break;
 
     // Work stealing
     int tileIndex;
@@ -394,27 +395,27 @@ void OptimizedMultiThreadedSIMDRasterizer::WorkerThreadFunctionOptimized(int thr
 //-----------------------------------------------------------------------------
 // StealWork
 //-----------------------------------------------------------------------------
-bool OptimizedMultiThreadedSIMDRasterizer::StealWork(int threadId, int& outTileIndex)
-{
-  // Tentative de vol de travail depuis d'autres threads
-  for (int i = 0; i < _NumThreads; ++i)
-  {
-    if (i == threadId)
-      continue;
-
-    int otherIndex = _ThreadWorkIndices[i].load();
-    if (otherIndex < _OptimizedTiles.size())
-    {
-      int stolenIndex = _ThreadWorkIndices[i].fetch_add(1);
-      if (stolenIndex < _OptimizedTiles.size())
-      {
-        outTileIndex = stolenIndex;
-        return true;
-      }
-    }
-  }
-  return false;
-}
+//bool OptimizedMultiThreadedSIMDRasterizer::StealWork(int threadId, int& outTileIndex)
+//{
+//  // Tentative de vol de travail depuis d'autres threads
+//  for (int i = 0; i < _NumThreads; ++i)
+//  {
+//    if (i == threadId)
+//      continue;
+//
+//    int otherIndex = _ThreadWorkIndices[i].load();
+//    if (otherIndex < _OptimizedTiles.size())
+//    {
+//      int stolenIndex = _ThreadWorkIndices[i].fetch_add(1);
+//      if (stolenIndex < _OptimizedTiles.size())
+//      {
+//        outTileIndex = stolenIndex;
+//        return true;
+//      }
+//    }
+//  }
+//  return false;
+//}
 
 //-----------------------------------------------------------------------------
 // TestBlockVisibility
@@ -522,9 +523,7 @@ float OptimizedMultiThreadedSIMDRasterizer::InterpolateDepth1x(float x, float y,
   const float w = tri.edgeA[2] * x + tri.edgeB[2] * y + tri.edgeC[2];
 
   // Interpolation lineaire de la profondeur Z (pour le Z-buffer)
-  return u * tri.screenVertices[0].z +
-    v * tri.screenVertices[1].z +
-    w * tri.screenVertices[2].z;
+  return u * tri.screenVertices[0].z + v * tri.screenVertices[1].z + w * tri.screenVertices[2].z;
 }
 
 //-----------------------------------------------------------------------------

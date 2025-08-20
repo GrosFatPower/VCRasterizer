@@ -49,8 +49,6 @@ protected:
   {
     alignas(32) float                       _DepthBuffer[TILE_SIZE * TILE_SIZE];
     alignas(32) uint32_t                    _ColorBuffer[TILE_SIZE * TILE_SIZE];
-    std::vector<const TransformedTriangle*> _LocalTriangles;
-
     ThreadLocalData();
   };
 
@@ -80,7 +78,7 @@ protected:
 
   // Threading optimise avec work stealing
   void WorkerThreadFunctionOptimized(int threadId);
-  bool StealWork(int threadId, int& outTileIndex);
+  //bool StealWork(int threadId, int& outTileIndex);
 
   glm::vec4 TransformVertex(const glm::vec3& vertex, const glm::mat4& mvp);
   void TransformTriangles(const glm::mat4& mvp);
@@ -153,7 +151,6 @@ inline OptimizedMultiThreadedSIMDRasterizer::ThreadLocalData::ThreadLocalData()
   // Initialize buffers to default values
   std::fill_n(_DepthBuffer, TILE_SIZE * TILE_SIZE, std::numeric_limits<float>::infinity());
   std::fill_n(_ColorBuffer, TILE_SIZE * TILE_SIZE, 0);
-  _LocalTriangles.reserve(1000);
 }
 
 inline OptimizedMultiThreadedSIMDRasterizer::TileData::TileData()

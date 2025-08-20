@@ -208,24 +208,22 @@ void MultiThreadedSIMDRasterizer::BinTrianglesToTiles()
 //-----------------------------------------------------------------------------
 void MultiThreadedSIMDRasterizer::WorkerThreadFunction()
 {
-  while (true)
+  while ( !_TerminateThreadWorkAtomic.load() )
   {
-    std::unique_lock<std::mutex> lock(_RenderMutex);
-    _RenderCV.wait(lock, [this] {
-      return _RenderingActiveAtomic.load() || _TerminateThreadWorkAtomic.load(); // Check for exit condition
-      });
-
-    if (_TerminateThreadWorkAtomic.load())
+    {
+      std::unique_lock<std::mutex> lock(_RenderMutex);
+      _RenderCV.wait(lock, [this] { return _RenderingActiveAtomic.load() || _TerminateThreadWorkAtomic.load(); }); // Check for exit condition
+    }
+    if ( _TerminateThreadWorkAtomic.load() )
       break;
 
-    while (_RenderingActiveAtomic.load())
+    while ( _RenderingActiveAtomic.load() )
     {
       int tileIndex = _NextTileIndexAtomic.fetch_add(1);
-      if (tileIndex >= _Tiles.size())
+      if ( tileIndex >= _Tiles.size() )
         break;
-      lock.unlock();
+
       RenderTile(_Tiles[tileIndex]);
-      lock.lock();
     }
   }
 }

@@ -140,9 +140,6 @@ private:
 
   // Scene
   std::vector<TransformedTriangle> _Transformed;
-
-  // Lookup tables pour optimisations
-  alignas(32) float _EdgeLUT[256];
 };
 
 inline OptimizedMultiThreadedSIMDRasterizer::ThreadLocalData::ThreadLocalData()

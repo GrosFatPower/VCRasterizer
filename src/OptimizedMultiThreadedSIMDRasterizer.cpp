@@ -44,9 +44,6 @@ OptimizedMultiThreadedSIMDRasterizer::OptimizedMultiThreadedSIMDRasterizer(int w
   for (int i = 0; i < _NumThreads; ++i)
     _ThreadLocalData[i] = std::make_unique<ThreadLocalData>();
 
-  // Initialisation de la lookup table pour optimisations
-  InitializeLookupTables();
-
   // Demarrage des threads worker
   //_ThreadWorkIndices.resize(_NumThreads);
   for (int i = 0; i < _NumThreads; ++i)
@@ -75,18 +72,6 @@ OptimizedMultiThreadedSIMDRasterizer::~OptimizedMultiThreadedSIMDRasterizer()
     {
       thread.join();
     }
-  }
-}
-
-//-----------------------------------------------------------------------------
-// InitializeLookupTables
-//-----------------------------------------------------------------------------
-void OptimizedMultiThreadedSIMDRasterizer::InitializeLookupTables()
-{
-  // Initialisation de la lookup table pour les edge functions
-  for (int i = 0; i < 256; ++i)
-  {
-    _EdgeLUT[i] = (float)i / 255.0f;
   }
 }
 

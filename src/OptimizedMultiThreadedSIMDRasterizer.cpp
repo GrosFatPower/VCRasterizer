@@ -35,7 +35,7 @@ OptimizedMultiThreadedSIMDRasterizer::OptimizedMultiThreadedSIMDRasterizer(int w
       tileData._TriangleCountAtomic = 0;
       tileData._NeedsProcessingAtomic = false;
 
-      tileData._Triangles.reserve(1000); // Reserver de l'espace
+      tileData._Tile.triangles.reserve(1000); // Reserver de l'espace
     }
   }
 
@@ -273,7 +273,7 @@ void OptimizedMultiThreadedSIMDRasterizer::HierarchicalBinning()
   // Reset des tuiles
   for (auto& tileData : _OptimizedTiles)
   {
-    tileData._Triangles.clear();
+    tileData._Tile.triangles.clear();
     tileData._TriangleCountAtomic = 0;
     tileData._NeedsProcessingAtomic = false;
   }
@@ -311,7 +311,7 @@ void OptimizedMultiThreadedSIMDRasterizer::HierarchicalBinning()
         if (tx < _TileCountX && ty < _TileCountY)
         {
           int tileIndex = ty * _TileCountX + tx;
-          _OptimizedTiles[tileIndex]._Triangles.push_back(&tri);
+          _OptimizedTiles[tileIndex]._Tile.triangles.push_back(&tri);
           _OptimizedTiles[tileIndex]._TriangleCountAtomic++;
           _OptimizedTiles[tileIndex]._NeedsProcessingAtomic = true;
         }
@@ -542,7 +542,7 @@ void OptimizedMultiThreadedSIMDRasterizer::RenderTile(const Tile& tile, ThreadLo
   }
 
   // Rendu de tous les triangles du tile
-  for (const TransformedTriangle* tri : tileData._Triangles)
+  for (const TransformedTriangle* tri : tileData._Tile.triangles)
     RenderTriangleInTile(*tri, tile, localData);
 
   // Copie du tile local vers le buffer principal
@@ -726,7 +726,7 @@ void OptimizedMultiThreadedSIMDRasterizer::RenderTileAVX2(const Tile& tile, Thre
   }
 
   // Rendu de tous les triangles du tile
-  for (const TransformedTriangle* tri : tileData._Triangles)
+  for (const TransformedTriangle* tri : tileData._Tile.triangles)
   {
     RenderTriangleInTile16x(*tri, tile, localData);
   }

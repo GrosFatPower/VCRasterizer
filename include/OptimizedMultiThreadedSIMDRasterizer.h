@@ -55,7 +55,6 @@ protected:
   struct alignas(64) TileData
   {
     Tile                                    _Tile;
-    std::vector<const TransformedTriangle*> _Triangles;
     std::atomic<int>                        _TriangleCountAtomic;
     std::atomic<bool>                       _NeedsProcessingAtomic;
 
@@ -157,13 +156,11 @@ inline OptimizedMultiThreadedSIMDRasterizer::TileData::TileData()
 : _TriangleCountAtomic(0)
 , _NeedsProcessingAtomic(false)
 {
-  _Triangles.reserve(500);
 }
 
 // Add move constructor and assignment operator
 inline OptimizedMultiThreadedSIMDRasterizer::TileData::TileData(TileData&& other) noexcept
   : _Tile(std::move(other._Tile))
-  , _Triangles(std::move(other._Triangles))
   , _TriangleCountAtomic(other._TriangleCountAtomic.load())
   , _NeedsProcessingAtomic(other._NeedsProcessingAtomic.load())
 {
@@ -173,7 +170,6 @@ inline OptimizedMultiThreadedSIMDRasterizer::TileData& OptimizedMultiThreadedSIM
 {
   if (this != &other) {
     _Tile = std::move(other._Tile);
-    _Triangles = std::move(other._Triangles);
     _TriangleCountAtomic = other._TriangleCountAtomic.load();
     _NeedsProcessingAtomic = other._NeedsProcessingAtomic.load();
   }
